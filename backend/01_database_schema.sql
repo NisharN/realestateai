@@ -99,6 +99,25 @@ CREATE TABLE IF NOT EXISTS activities (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Workspaces: one broker/agency's configuration (team, data sources,
+-- channels). Added for the /configure workflow-builder POC. Note: leads,
+-- properties, brokers, and conversations above are NOT yet scoped by
+-- workspace_id — this table stores configuration only. Real multi-tenancy
+-- would add a workspace_id column (+ index, + RLS policy) to each of those
+-- tables and filter every query by it. See docs/poc_scope.md.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(150) NOT NULL,
+    team JSONB DEFAULT '[]',
+    data_sources JSONB DEFAULT '[]',
+    channels JSONB DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'draft', -- 'draft' | 'live'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces(status);
+
 -- Lead-property matches
 CREATE TABLE IF NOT EXISTS lead_property_matches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

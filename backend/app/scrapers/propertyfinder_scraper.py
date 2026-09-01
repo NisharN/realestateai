@@ -1,5 +1,6 @@
 """PropertyFinder.ae scraper for Dubai real estate."""
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 
@@ -37,10 +38,10 @@ class PropertyFinderScraper(BaseScraper):
 
             search_path = self.SEARCH_URLS.get(property_type, "/en/buy/apartments-for-sale.html")
 
-            # Build query params
+            # Build query params. Property Finder's search URLs and location
+            # parameter conventions change frequently; area filtering is safer
+            # to apply after extraction than by composing brittle query strings.
             params = []
-            if area:
-                params.append(f"location={area.lower().replace(' ', '-')}")
             if min_price:
                 params.append(f"price_min={min_price}")
             if max_price:
@@ -54,8 +55,20 @@ class PropertyFinderScraper(BaseScraper):
 
             logger.info(f"Scraping PropertyFinder: {url}")
 
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception:
+                try:
+                    await page.goto(url, wait_until="load", timeout=30000)
+                except Exception:
+                    return listings
+
             await self.random_delay(3, 6)
+            block_reason = await self.detect_block(page, "Property Finder")
+            if block_reason:
+                logger.warning(block_reason)
+                await page.close()
+                return listings
             await self.scroll_page(page, scrolls=5)
 
             # PropertyFinder uses card-based layout
@@ -78,10 +91,47 @@ class PropertyFinderScraper(BaseScraper):
                 try:
                     listing = await self._parse_pf_card(card)
                     if listing:
-                        listings.append(self.normalize_property(listing))
+                        normalized = self.normalize_property(listing)
+                        if area and area.lower() not in (normalized.get("area") or "").lower():
+                            continue
+                        if self.is_legit_listing(normalized):
+                            listings.append(normalized)
                 except Exception as e:
                     logger.warning(f"PF card parse error: {e}")
                     continue
+
+            for pageno in range(2, pages + 1):
+                next_url = f"{url}{'&' if '?' in url else '?'}page={pageno}"
+                logger.info(f"Scraping PropertyFinder page {pageno}: {next_url}")
+                try:
+                    await page.goto(next_url, wait_until="domcontentloaded", timeout=45000)
+                except Exception:
+                    break
+                await self.random_delay(3, 6)
+                block_reason = await self.detect_block(page, "Property Finder")
+                if block_reason:
+                    logger.warning(block_reason)
+                    break
+                await self.scroll_page(page, scrolls=4)
+
+                cards = []
+                for selector in selectors:
+                    cards = await page.query_selector_all(selector)
+                    if cards:
+                        break
+
+                for card in cards[:20]:
+                    try:
+                        listing = await self._parse_pf_card(card)
+                        if listing:
+                            normalized = self.normalize_property(listing)
+                            if area and area.lower() not in (normalized.get("area") or "").lower():
+                                continue
+                            if self.is_legit_listing(normalized):
+                                listings.append(normalized)
+                    except Exception as e:
+                        logger.warning(f"PF page {pageno} parse error: {e}")
+                        continue
 
             await page.close()
 
@@ -93,30 +143,62 @@ class PropertyFinderScraper(BaseScraper):
     async def _parse_pf_card(self, card) -> Optional[Dict[str, Any]]:
         """Parse PropertyFinder card."""
         try:
-            title_el = await card.query_selector('h2, [data-testid="title"], .title')
-            title = await title_el.inner_text() if title_el else ""
+            text = " ".join((await card.inner_text()).split())
+            lines = [line.strip() for line in (await card.inner_text()).splitlines() if line.strip()]
 
-            price_el = await card.query_selector('[data-testid="price"], .price')
-            price = await price_el.inner_text() if price_el else ""
+            link_el = await card.query_selector('a[href^="/en/"]')
+            href = await link_el.get_attribute("href") if link_el else ""
+            if not href:
+                all_links = await card.query_selector_all("a[href]")
+                for anchor in all_links:
+                    candidate = await anchor.get_attribute("href")
+                    if candidate and "/en/" in candidate:
+                        href = candidate
+                        break
+            if not href:
+                return None
 
-            location_el = await card.query_selector('[data-testid="location"], .location')
-            location = await location_el.inner_text() if location_el else ""
+            title = ""
+            location = ""
+            for i, line in enumerate(lines):
+                if line.startswith("AED") or re.fullmatch(r"\d[\d,]*", line):
+                    for candidate in lines[i + 1 : i + 8]:
+                        lower = candidate.lower()
+                        if len(candidate) > 10 and not lower.startswith(("listed", "call", "email", "whatsapp", "area:", "delivery date:", "launch price:")):
+                            title = candidate
+                            break
+                    for candidate in lines[i + 1 : i + 10]:
+                        if "," in candidate and "dubai" in candidate.lower():
+                            location = candidate
+                            break
+                    if title:
+                        break
+
+            price_match = re.search(r"(\d[\d,]*)\s*AED|AED\s*([\d,]+)", text, flags=re.IGNORECASE)
+            if not price_match:
+                for line in lines:
+                    if re.fullmatch(r"\d[\d,]*", line):
+                        price_match = re.match(r"(\d[\d,]*)", line)
+                        break
+            price = (price_match.group(1) or price_match.group(2)) if price_match else ""
 
             img_el = await card.query_selector('img')
             img = await img_el.get_attribute("src") if img_el else ""
 
-            link_el = await card.query_selector('a[href]')
-            href = await link_el.get_attribute("href") if link_el else ""
+            beds = None
+            baths = None
+            size = None
+            size_match = re.search(r"Area:\s*([\d,]+)\s*ft(?:²|2)?", text, flags=re.IGNORECASE)
+            if size_match:
+                size = size_match.group(1)
 
-            # Extract details
-            beds_el = await card.query_selector('[data-testid="bedrooms"], [aria-label*="bed"]')
-            beds = await beds_el.inner_text() if beds_el else None
-
-            baths_el = await card.query_selector('[data-testid="bathrooms"], [aria-label*="bath"]')
-            baths = await baths_el.inner_text() if baths_el else None
-
-            size_el = await card.query_selector('[data-testid="size"], [aria-label*="sqft"]')
-            size = await size_el.inner_text() if size_el else None
+            if location and location in lines:
+                loc_index = lines.index(location)
+                numeric_lines = [line for line in lines[max(0, loc_index - 4):loc_index] if re.fullmatch(r"\d+|studio", line.lower())]
+                if len(numeric_lines) >= 1:
+                    beds = numeric_lines[0]
+                if len(numeric_lines) >= 2:
+                    baths = numeric_lines[1]
 
             property_type = "apartment"
             if "villa" in title.lower():
@@ -125,7 +207,7 @@ class PropertyFinderScraper(BaseScraper):
                 property_type = "penthouse"
 
             return {
-                "id": href.split("-")[-1].replace(".html", "") if href else "",
+                "id": href.rstrip("/").split("/")[-1].replace(".html", ""),
                 "url": urljoin(self.BASE_URL, href) if href else "",
                 "title": title.strip(),
                 "price": price,

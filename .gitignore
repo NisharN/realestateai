@@ -31,4 +31,6 @@ pip-delete-this-directory.s
 *.tmp
 *.bak
 *.swp
-.env.example
+.env.exampleex
+backend/runtime/
+backend/*.state.json

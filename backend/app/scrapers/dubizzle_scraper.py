@@ -1,5 +1,6 @@
 """Dubizzle.com scraper for Dubai classifieds/properties."""
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 
@@ -53,8 +54,20 @@ class DubizzleScraper(BaseScraper):
 
             logger.info(f"Scraping Dubizzle: {url}")
 
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception:
+                try:
+                    await page.goto(url, wait_until="load", timeout=30000)
+                except Exception:
+                    return listings
+
             await self.random_delay(3, 6)
+            block_reason = await self.detect_block(page, "Dubizzle")
+            if block_reason:
+                logger.warning(block_reason)
+                await page.close()
+                return listings
             await self.scroll_page(page, scrolls=5)
 
             # Dubizzle listing selectors
@@ -76,7 +89,9 @@ class DubizzleScraper(BaseScraper):
                 try:
                     listing = await self._parse_dubizzle_card(card)
                     if listing:
-                        listings.append(self.normalize_property(listing))
+                        normalized = self.normalize_property(listing)
+                        if self.is_legit_listing(normalized):
+                            listings.append(normalized)
                 except Exception as e:
                     logger.warning(f"Dubizzle parse error: {e}")
                     continue
@@ -91,20 +106,51 @@ class DubizzleScraper(BaseScraper):
     async def _parse_dubizzle_card(self, card) -> Optional[Dict[str, Any]]:
         """Parse Dubizzle listing card."""
         try:
-            title_el = await card.query_selector('h2, [data-testid="title"], .title')
-            title = await title_el.inner_text() if title_el else ""
+            text = " ".join((await card.inner_text()).split())
+            lines = [line.strip() for line in (await card.inner_text()).splitlines() if line.strip()]
 
-            price_el = await card.query_selector('[data-testid="price"], .price')
-            price = await price_el.inner_text() if price_el else ""
+            href = ""
+            links = await card.query_selector_all("a[href]")
+            for anchor in links:
+                candidate = await anchor.get_attribute("href")
+                if candidate and "/property-for-sale/" in candidate:
+                    href = candidate
+                    break
+            if not href:
+                return None
 
-            location_el = await card.query_selector('[data-testid="location"], .location')
-            location = await location_el.inner_text() if location_el else ""
+            title = ""
+            location = ""
+            for i, line in enumerate(lines):
+                if line.startswith("AED"):
+                    for candidate in lines[i + 1 : i + 8]:
+                        lower = candidate.lower()
+                        if len(candidate) > 10 and not lower.startswith(("handover", "payment plan", "email", "call", "whatsapp")):
+                            title = candidate
+                            break
+                    for candidate in lines[i + 1 : i + 10]:
+                        if "," in candidate and "dubai" in candidate.lower():
+                            location = candidate
+                            break
+                    if title:
+                        break
+
+            price_match = re.search(r"AED\s*([\d,]+)", text)
+            price = price_match.group(1) if price_match else ""
 
             img_el = await card.query_selector('img')
             img = await img_el.get_attribute("src") if img_el else ""
 
-            link_el = await card.query_selector('a[href]')
-            href = await link_el.get_attribute("href") if link_el else ""
+            beds = None
+            baths = None
+            size = None
+            triplet_match = re.search(
+                r"Apartment\s+(Studio|\d+)\s*Bed[s]?\s+(\d+)\s*Bath.*?(\d[\d,]*)\s*sqft",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if triplet_match:
+                beds, baths, size = triplet_match.group(1), triplet_match.group(2), triplet_match.group(3)
 
             property_type = "apartment"
             if "villa" in title.lower():
@@ -113,12 +159,15 @@ class DubizzleScraper(BaseScraper):
                 property_type = "penthouse"
 
             return {
-                "id": href.split("/")[-2] if "/" in href else "",
+                "id": href.rstrip("/").split("/")[-1],
                 "url": urljoin(self.BASE_URL, href) if href else "",
                 "title": title.strip(),
                 "price": price,
                 "area": location.strip(),
                 "property_type": property_type,
+                "bedrooms": beds,
+                "bathrooms": baths,
+                "size": size,
                 "images": [img] if img else [],
                 "description": "",
             }

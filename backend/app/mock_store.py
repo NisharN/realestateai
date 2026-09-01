@@ -104,19 +104,63 @@ MOCK_BROKERS: List[Dict[str, Any]] = [
 ]
 
 _leads: Dict[str, Dict[str, Any]] = {}
-_properties: Dict[str, Dict[str, Any]] = {p["id"]: deepcopy(p) for p in MOCK_PROPERTIES}
+_properties: Dict[str, Dict[str, Any]] = {}
 _conversations: Dict[str, Dict[str, Any]] = {}
 _activities: Dict[str, Dict[str, Any]] = {}
+_workspaces: Dict[str, Dict[str, Any]] = {}
+
+
+def load_seed_data() -> Dict[str, int]:
+    """Populate the in-memory store from ``app.seed_data``.
+
+    This is what makes mock mode a usable product demo rather than an empty
+    shell: leads spread across pipeline stages, a listing book with a
+    realistic proportion already stale, and brokers to assign to. Called at
+    import so every repository sees the same world, and re-callable from the
+    seed script to reset a demo between walkthroughs.
+    """
+    from app.config import get_settings
+    from app.seed_data import mock_leads, mock_property_records
+
+    workspace_id = get_settings().WORKSPACE_ID
+
+    _properties.clear()
+    for record in mock_property_records():
+        record = deepcopy(record)
+        record["workspace_id"] = workspace_id
+        _properties[record["id"]] = record
+    # Keep the original hand-written demo listings too — they have recognisable
+    # Dubai landmark names that read well in a screenshot.
+    for record in MOCK_PROPERTIES:
+        record = deepcopy(record)
+        record["workspace_id"] = workspace_id
+        record.setdefault("last_refreshed_at", record.get("scraped_at"))
+        _properties[record["id"]] = record
+
+    _leads.clear()
+    for record in mock_leads():
+        record = deepcopy(record)
+        record["workspace_id"] = workspace_id
+        _leads[record["id"]] = record
+
+    return {"properties": len(_properties), "leads": len(_leads)}
+
+
+load_seed_data()
 
 
 class MockLeadRepository:
     """In-memory lead storage."""
+
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
 
     async def create(self, lead_data: Dict[str, Any]) -> Dict[str, Any]:
         lead_id = _new_id()
         record = {
             **lead_data,
             "id": lead_id,
+            "workspace_id": self.workspace_id,
             "intent_score": lead_data.get("intent_score", 0),
             "status": lead_data.get("status", "new"),
             "conversation_history": lead_data.get("conversation_history", []),
@@ -128,25 +172,36 @@ class MockLeadRepository:
 
     async def get_by_id(self, lead_id: str) -> Optional[Dict[str, Any]]:
         lead = _leads.get(lead_id)
-        return deepcopy(lead) if lead else None
+        if not lead or lead.get("workspace_id") != self.workspace_id:
+            return None
+        return deepcopy(lead)
 
     async def get_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         for lead in _leads.values():
-            if lead.get("phone") == phone:
+            if lead.get("workspace_id") == self.workspace_id and lead.get("phone") == phone:
                 return deepcopy(lead)
         return None
 
     async def update(self, lead_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-        if lead_id not in _leads:
+        if lead_id not in _leads or _leads[lead_id].get("workspace_id") != self.workspace_id:
             raise ValueError(f"Lead {lead_id} not found")
         _leads[lead_id].update(updates)
         _leads[lead_id]["updated_at"] = _now()
         return deepcopy(_leads[lead_id])
 
     async def list_by_status(
-        self, status: str, limit: int = 50, offset: int = 0
+        self,
+        status: str,
+        limit: int = 50,
+        offset: int = 0,
+        assigned_broker_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        items = [l for l in _leads.values() if l.get("status") == status]
+        items = [
+            l for l in _leads.values()
+            if l.get("workspace_id") == self.workspace_id and l.get("status") == status
+        ]
+        if assigned_broker_id:
+            items = [l for l in items if l.get("assigned_broker") == assigned_broker_id]
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return [deepcopy(l) for l in items[offset : offset + limit]]
 
@@ -156,7 +211,9 @@ class MockLeadRepository:
         items = [
             l
             for l in _leads.values()
-            if not l.get("assigned_broker") and l.get("intent_score", 0) >= min_score
+            if l.get("workspace_id") == self.workspace_id
+            and not l.get("assigned_broker")
+            and l.get("intent_score", 0) >= min_score
         ]
         items.sort(key=lambda x: x.get("intent_score", 0), reverse=True)
         return [deepcopy(l) for l in items[:limit]]
@@ -170,11 +227,44 @@ class MockLeadRepository:
 class MockPropertyRepository:
     """In-memory property storage."""
 
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+
     async def create(self, property_data: Dict[str, Any]) -> Dict[str, Any]:
         prop_id = property_data.get("id") or _new_id()
-        record = {**property_data, "id": prop_id, "is_active": True, "scraped_at": _now()}
+        record = {
+            **property_data,
+            "id": prop_id,
+            "workspace_id": self.workspace_id,
+            "is_active": True,
+            "scraped_at": _now(),
+        }
         _properties[prop_id] = record
         return deepcopy(record)
+
+    async def get_by_source_ref(
+        self,
+        source: str,
+        source_id: Optional[str] = None,
+        source_url: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        for prop in _properties.values():
+            if prop.get("workspace_id") != self.workspace_id or prop.get("source") != source:
+                continue
+            if source_id and prop.get("source_id") == source_id:
+                return deepcopy(prop)
+            if source_url and prop.get("source_url") == source_url:
+                return deepcopy(prop)
+        return None
+
+    async def update(self, property_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        if (
+            property_id not in _properties
+            or _properties[property_id].get("workspace_id") != self.workspace_id
+        ):
+            raise ValueError(f"Property {property_id} not found")
+        _properties[property_id].update(updates)
+        return deepcopy(_properties[property_id])
 
     async def search_by_criteria(
         self,
@@ -185,7 +275,10 @@ class MockPropertyRepository:
         bedrooms: Optional[int] = None,
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
-        results = [p for p in _properties.values() if p.get("is_active", True)]
+        results = [
+            p for p in _properties.values()
+            if p.get("workspace_id") == self.workspace_id and p.get("is_active", True)
+        ]
         if area:
             results = [p for p in results if area.lower() in (p.get("area") or "").lower()]
         if property_type:
@@ -201,25 +294,30 @@ class MockPropertyRepository:
 
     async def get_by_id(self, property_id: str) -> Optional[Dict[str, Any]]:
         prop = _properties.get(property_id)
-        return deepcopy(prop) if prop else None
+        if not prop or prop.get("workspace_id") != self.workspace_id:
+            return None
+        return deepcopy(prop)
 
 
 class MockConversationRepository:
     """In-memory conversation storage."""
 
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+
     async def create(self, conversation_data: Dict[str, Any]) -> Dict[str, Any]:
         conv_id = _new_id()
-        record = {**conversation_data, "id": conv_id, "created_at": _now()}
+        record = {**conversation_data, "id": conv_id, "workspace_id": self.workspace_id, "created_at": _now()}
         _conversations[conv_id] = record
         return deepcopy(record)
 
     async def get_by_lead(self, lead_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        items = [c for c in _conversations.values() if c.get("lead_id") == lead_id]
+        items = [c for c in _conversations.values() if c.get("workspace_id") == self.workspace_id and c.get("lead_id") == lead_id]
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return [deepcopy(c) for c in items[:limit]]
 
     async def add_message(self, conversation_id: str, message: Dict[str, Any]) -> Dict[str, Any]:
-        if conversation_id not in _conversations:
+        if conversation_id not in _conversations or _conversations[conversation_id].get("workspace_id") != self.workspace_id:
             raise ValueError("Conversation not found")
         messages = _conversations[conversation_id].get("messages", []) or []
         messages.append(message)
@@ -230,10 +328,17 @@ class MockConversationRepository:
 class MockBrokerRepository:
     """In-memory broker storage."""
 
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+        self.brokers = [
+            {**deepcopy(broker), "workspace_id": workspace_id}
+            for broker in MOCK_BROKERS
+        ]
+
     async def get_available_broker(
         self, specialization: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
-        for broker in MOCK_BROKERS:
+        for broker in self.brokers:
             if not broker.get("is_active"):
                 continue
             if broker.get("active_leads", 0) >= broker.get("max_leads", 10):
@@ -245,14 +350,14 @@ class MockBrokerRepository:
         return None
 
     async def increment_lead_count(self, broker_id: str) -> Optional[Dict[str, Any]]:
-        for broker in MOCK_BROKERS:
+        for broker in self.brokers:
             if broker["id"] == broker_id:
                 broker["active_leads"] = (broker.get("active_leads", 0) or 0) + 1
                 return deepcopy(broker)
         return None
 
     async def get_by_id(self, broker_id: str) -> Optional[Dict[str, Any]]:
-        for broker in MOCK_BROKERS:
+        for broker in self.brokers:
             if broker["id"] == broker_id:
                 return deepcopy(broker)
         return None
@@ -261,13 +366,58 @@ class MockBrokerRepository:
 class MockActivityRepository:
     """In-memory activity storage."""
 
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+
     async def create(self, activity_data: Dict[str, Any]) -> Dict[str, Any]:
         activity_id = _new_id()
-        record = {**activity_data, "id": activity_id, "created_at": _now()}
+        record = {**activity_data, "id": activity_id, "workspace_id": self.workspace_id, "created_at": _now()}
         _activities[activity_id] = record
         return deepcopy(record)
 
     async def get_by_lead(self, lead_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        items = [a for a in _activities.values() if a.get("lead_id") == lead_id]
+        items = [a for a in _activities.values() if a.get("workspace_id") == self.workspace_id and a.get("lead_id") == lead_id]
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return [deepcopy(a) for a in items[:limit]]
+
+
+class MockWorkspaceRepository:
+    """In-memory workspace (broker/agency configuration) storage.
+
+    Backs the /configure workflow builder for the POC. See
+    app/models/workspace.py for the shape of a workspace record.
+    """
+
+    async def create(self, workspace_data: Dict[str, Any]) -> Dict[str, Any]:
+        workspace_id = self.workspace_id
+        record = {
+            **workspace_data,
+            "id": workspace_id,
+            "status": workspace_data.get("status", "draft"),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        _workspaces[workspace_id] = record
+        return deepcopy(record)
+
+    async def get_by_id(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+        if workspace_id != self.workspace_id:
+            return None
+        record = _workspaces.get(workspace_id)
+        return deepcopy(record) if record else None
+
+    async def update(self, workspace_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        if workspace_id != self.workspace_id:
+            raise ValueError("Workspace not found")
+        if workspace_id not in _workspaces:
+            raise ValueError(f"Workspace {workspace_id} not found")
+        _workspaces[workspace_id].update(updates)
+        _workspaces[workspace_id]["updated_at"] = _now()
+        return deepcopy(_workspaces[workspace_id])
+
+    async def list_all(self, limit: int = 50) -> List[Dict[str, Any]]:
+        items = [w for w in _workspaces.values() if w.get("id") == self.workspace_id]
+        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return [deepcopy(w) for w in items[:limit]]
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id

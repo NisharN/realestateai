@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import dynamic from "next/dynamic";
+import { leadsApi, propertiesApi, VoiceWebSocket } from "@/lib/api";
 import {
   Send,
   Mic,
@@ -21,31 +23,25 @@ import {
   Bot,
   User,
   Loader2,
-  Play,
   Image as ImageIcon,
   Video,
+  Sparkles,
 } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 
-// Fix for Leaflet marker icons in Next.js/React
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
-L.Marker.prototype.options.icon = L.icon({
-  iconUrl: markerIcon.src || markerIcon,
-  iconRetinaUrl: markerIcon2x.src || markerIcon2x,
-  shadowUrl: markerShadow.src || markerShadow,
+// Leaflet / react-leaflet are client-only (they touch `window` at import time).
+// Load them lazily so SSR can succeed.
+const PropertyMap = dynamic(() => import("./_property-map").then((m) => m.PropertyMap), {
+  ssr: false,
+  loading: () => null,
 });
 
-// Types
+// ─── Types ──────────────────────────────────────────────────────────────────
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   properties?: Property[];
+  needsHuman?: boolean;
   timestamp: Date;
 }
 
@@ -65,65 +61,13 @@ interface Property {
   match_score?: number;
 }
 
-// Mock data for demo
-const MOCK_PROPERTIES: Property[] = [
-  {
-    id: "prop-1",
-    title: "Burj Vista Tower 1 - Luxury 2BR",
-    area: "Downtown Dubai",
-    price: 3200000,
-    bedrooms: 2,
-    bathrooms: 2,
-    size_sqft: 1200,
-    images: [
-      "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800",
-      "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800",
-    ],
-    video_url: "https://example.com/video1",
-    map_lat: 25.1972,
-    map_lng: 55.2744,
-    amenities: ["Gym", "Pool", "Concierge", "Parking"],
-    match_score: 95,
-  },
-  {
-    id: "prop-2",
-    title: "Address Boulevard - 3BR Penthouse",
-    area: "Downtown Dubai",
-    price: 8500000,
-    bedrooms: 3,
-    bathrooms: 3,
-    size_sqft: 2500,
-    images: [
-      "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800",
-    ],
-    map_lat: 25.2048,
-    map_lng: 55.2708,
-    amenities: ["Private Pool", "Smart Home", "Valet", "Spa"],
-    match_score: 88,
-  },
-  {
-    id: "prop-3",
-    title: "Marina Gate - Sea View 1BR",
-    area: "Dubai Marina",
-    price: 1800000,
-    bedrooms: 1,
-    bathrooms: 1,
-    size_sqft: 800,
-    images: [
-      "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800",
-    ],
-    map_lat: 25.0895,
-    map_lng: 55.1515,
-    amenities: ["Beach Access", "Gym", "Parking"],
-    match_score: 82,
-  },
-];
-
-// Utility
-const cn = (...classes: (string | boolean | undefined)[]) =>
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const cn = (...classes: (string | boolean | undefined | null)[]) =>
   classes.filter(Boolean).join(" ");
 
-// Components
+const fmtAED = (n: number) => `AED ${n.toLocaleString()}`;
+
+// ─── Property Card ──────────────────────────────────────────────────────────
 function PropertyCard({
   property,
   onViewMap,
@@ -140,12 +84,15 @@ function PropertyCard({
       animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100 max-w-md"
     >
-      {/* Image Carousel */}
       <div className="relative h-48 bg-gray-100">
         <img
           src={property.images[currentImage]}
           alt={property.title}
           className="w-full h-full object-cover"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src =
+              "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800";
+          }}
         />
         <div className="absolute top-3 right-3 flex gap-2">
           <button
@@ -174,18 +121,15 @@ function PropertyCard({
             ))}
           </div>
         )}
-        {property.match_score && (
+        {property.match_score != null && (
           <div className="absolute top-3 left-3 px-2 py-1 bg-green-500 text-white text-xs font-semibold rounded-full">
             {property.match_score}% Match
           </div>
         )}
       </div>
 
-      {/* Content */}
       <div className="p-4">
-        <h3 className="font-semibold text-gray-900 text-sm mb-1">
-          {property.title}
-        </h3>
+        <h3 className="font-semibold text-gray-900 text-sm mb-1">{property.title}</h3>
         <div className="flex items-center gap-1 text-gray-500 text-xs mb-3">
           <MapPin className="w-3 h-3" />
           {property.area}
@@ -195,15 +139,15 @@ function PropertyCard({
           <span className="flex items-center gap-1">
             <Bed className="w-3 h-3" />
             {property.bedrooms} BR
-          </span
+          </span>
           <span className="flex items-center gap-1">
             <Bath className="w-3 h-3" />
             {property.bathrooms} BA
-          </span
+          </span>
           <span className="flex items-center gap-1">
             <Maximize className="w-3 h-3" />
             {property.size_sqft.toLocaleString()} sqft
-          </span
+          </span>
         </div>
 
         <div className="flex flex-wrap gap-1 mb-3">
@@ -213,14 +157,12 @@ function PropertyCard({
               className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full"
             >
               {a}
-            </span
+            </span>
           ))}
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-lg font-bold text-gray-900">
-            AED {property.price.toLocaleString()}
-          </span
+          <span className="text-lg font-bold text-gray-900">{fmtAED(property.price)}</span>
           <div className="flex gap-2">
             <button
               onClick={() => onViewMap(property)}
@@ -231,99 +173,37 @@ function PropertyCard({
             <button className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition">
               View
             </button>
-          </div
-        </div
-      </div
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }
 
-function PropertyMap({
-  properties,
-  selectedProperty,
-  onClose,
-}: {
-  properties: Property[];
-  selectedProperty: Property | null;
-  onClose: () => void;
-}) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-    >
-      <motion.div
-        initial={{ scale: 0.9 }}
-        animate={{ scale: 1 }}
-        exit={{ scale: 0.9 }}
-        className="bg-white rounded-2xl overflow-hidden w-full max-w-4xl h-[80vh] relative"
-      >
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-[1000] p-2 bg-white/90 backdrop-blur rounded-full shadow-lg hover:bg-white transition"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <MapContainer
-          center={[selectedProperty?.map_lat || 25.2048, selectedProperty?.map_lng || 55.2708]}
-          zoom={12}
-          style={{ width: "100%", height: "100%" }}
-        >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
-          {properties.map((p) => (
-            <Marker key={p.id} position={[p.map_lat, p.map_lng]}>
-              <Popup>
-                <div className="w-64">
-                  <img
-                    src={p.images[0]}
-                    alt={p.title}
-                    className="w-full h-32 object-cover rounded-lg"
-                  />
-                  <div className="p-3">
-                    <h4 className="font-semibold text-sm">{p.title}</h4>
-                    <p className="text-blue-600 font-bold text-sm mt-1">
-                      AED {p.price.toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-      </motion.div>
-    </motion.div>
-  );
-}
-
+// ─── Voice Modal ────────────────────────────────────────────────────────────
 function VoiceModal({
   isOpen,
   onClose,
+  leadId,
+  onAgentMessage,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  leadId: string | null;
+  onAgentMessage: (text: string, properties?: Property[]) => void;
 }) {
-  const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState("");
+  const [status, setStatus] = useState<"idle" | "listening" | "connecting" | "sending">("idle");
+  const [recording, setRecording] = useState(false);
+  const wsRef = useRef<VoiceWebSocket | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Audio visualization
   useEffect(() => {
-    if (!isListening || !canvasRef.current) return;
+    if (!recording || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d")!;
@@ -352,7 +232,89 @@ function VoiceModal({
 
     draw();
     return () => cancelAnimationFrame(animationId);
-  }, [isListening]);
+  }, [recording]);
+
+  // Auto-connect WebSocket when modal opens and we have a lead
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!leadId) {
+      setStatus("idle");
+      return;
+    }
+
+    setStatus("connecting");
+    const ws = new VoiceWebSocket(
+      leadId,
+      (data) => {
+        if (data.type === "text") {
+          setResponse(data.content || "");
+          onAgentMessage(data.content || "", data.properties || []);
+        } else if (data.type === "audio") {
+          setResponse(data.text || "");
+          onAgentMessage(data.text || "", data.properties || []);
+        }
+      },
+      () => {
+        setStatus("idle");
+      }
+    );
+    ws.connect();
+    wsRef.current = ws;
+    setStatus("idle");
+
+    return () => {
+      ws.disconnect();
+      wsRef.current = null;
+    };
+  }, [isOpen, leadId, onAgentMessage]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(binary);
+        if (wsRef.current) {
+          wsRef.current.sendAudio(b64);
+          setStatus("sending");
+        }
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+      setStatus("listening");
+    } catch {
+      // Mic blocked — fall back to text mode
+      setStatus("idle");
+      setRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  const sendText = (txt: string) => {
+    if (!txt.trim()) return;
+    setTranscript(txt);
+    if (wsRef.current) {
+      wsRef.current.sendText(txt);
+      setStatus("sending");
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -367,7 +329,7 @@ function VoiceModal({
         initial={{ scale: 0.9, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.9, y: 20 }}
-        className="bg-white rounded-3xl p-8 w-full max-w-md text-center"
+        className="bg-white rounded-3xl p-8 w-full max-w-md text-center relative"
       >
         <button
           onClick={onClose}
@@ -382,19 +344,25 @@ function VoiceModal({
           </div>
           <h2 className="text-xl font-bold text-gray-900">Voice Conversation</h2>
           <p className="text-gray-500 text-sm mt-1">
-            {isListening ? "Listening..." : "Tap the microphone to start"}
+            {status === "listening"
+              ? "Listening..."
+              : status === "connecting"
+                ? "Connecting..."
+                : status === "sending"
+                  ? "Ali is thinking..."
+                  : leadId
+                    ? "Tap the mic or type below"
+                    : "Send a chat message first to start a session"}
           </p>
         </div>
 
-        {/* Audio Visualizer */}
         <canvas
           ref={canvasRef}
           width={300}
           height={80}
-          className="mx-auto mb-6 rounded-xl"
+          className="mx-auto mb-6 rounded-xl bg-gray-50"
         />
 
-        {/* Transcript */}
         {transcript && (
           <div className="mb-4 p-3 bg-gray-50 rounded-xl text-left">
             <p className="text-xs text-gray-500 mb-1">You said:</p>
@@ -409,29 +377,36 @@ function VoiceModal({
           </div>
         )}
 
-        {/* Controls */}
-        <button
-          onClick={() => {
-            setIsListening(!isListening);
-            if (!isListening) {
-              setTranscript("I'm looking for a 2 bedroom apartment in Downtown Dubai");
-              setTimeout(() => {
-                setResponse(
-                  "Great choice! I found 3 properties in Downtown Dubai. Let me show you..."
-                );
-                setIsListening(false);
-              }, 3000);
-            }
+        {/* Text fallback input — always available */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            const v = String(fd.get("voice-text") || "");
+            if (v.trim()) sendText(v);
+            (e.currentTarget as HTMLFormElement).reset();
           }}
+          className="mb-4"
+        >
+          <input
+            name="voice-text"
+            placeholder="Or type here..."
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+        </form>
+
+        <button
+          onClick={() => (recording ? stopRecording() : startRecording())}
+          disabled={!leadId || status === "connecting"}
           className={cn(
-            "w-16 h-16 rounded-full flex items-center justify-center transition-all",
-            isListening
+            "w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg mx-auto",
+            recording
               ? "bg-red-500 hover:bg-red-600 shadow-red-200"
               : "bg-blue-600 hover:bg-blue-700 shadow-blue-200",
-            "shadow-lg"
+            (!leadId || status === "connecting") && "opacity-50 cursor-not-allowed"
           )}
         >
-          {isListening ? (
+          {recording ? (
             <MicOff className="w-7 h-7 text-white" />
           ) : (
             <Mic className="w-7 h-7 text-white" />
@@ -442,7 +417,7 @@ function VoiceModal({
   );
 }
 
-// Main Chat Interface
+// ─── Main Chat Interface ────────────────────────────────────────────────────
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -459,6 +434,20 @@ export default function ChatPage() {
   const [showMap, setShowMap] = useState(false);
   const [mapProperty, setMapProperty] = useState<Property | null>(null);
   const [showVoice, setShowVoice] = useState(false);
+  const [leadId, setLeadId] = useState<string | null>(null);
+  const [mapProperties, setMapProperties] = useState<Property[]>([]);
+  const [needsHuman, setNeedsHuman] = useState(false);
+  const [showIngestForm, setShowIngestForm] = useState(true);
+  const [ingestForm, setIngestForm] = useState({
+    first_name: "",
+    phone: "",
+    email: "",
+    budget_min: "",
+    budget_max: "",
+    property_type: "apartment",
+    area_preference: "",
+    timeline: "1-3_months",
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -469,91 +458,221 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
+  const submitIngest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    const result = await leadsApi.ingest({
+      source: "website",
+      first_name: ingestForm.first_name || undefined,
+      phone: ingestForm.phone || undefined,
+      email: ingestForm.email || undefined,
+      preferred_language: language,
+      budget_min: ingestForm.budget_min ? Number(ingestForm.budget_min) : undefined,
+      budget_max: ingestForm.budget_max ? Number(ingestForm.budget_max) : undefined,
+      property_type: ingestForm.property_type,
+      area_preference: ingestForm.area_preference
+        ? ingestForm.area_preference.split(",").map((s) => s.trim()).filter(Boolean)
+        : [],
+      timeline: ingestForm.timeline,
+      message: input || undefined,
+    });
+    setIsLoading(false);
+
+    if (result.error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          role: "assistant",
+          content: `Sorry, I couldn't register you: ${result.error}`,
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    if (result.data) {
+      const id = (result.data as { lead_id: string }).lead_id;
+      setLeadId(id);
+      setShowIngestForm(false);
+
+      // First conversation turn: re-send the message so the agent greets + qualifies
+      const firstMsg = input.trim();
+      if (firstMsg) {
+        await continueChat(id, firstMsg);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now()),
+            role: "assistant",
+            content:
+              "Thanks! I've registered you. Now tell me — are you looking to buy, rent, or invest, and in which area?",
+            timestamp: new Date(),
+          },
+        ]);
+      }
+    }
+  };
+
+  const continueChat = useCallback(async (id: string, text: string) => {
+    const result = await leadsApi.sendMessage(id, { text });
+    if (result.error || !result.data) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now() + 1),
+          role: "assistant",
+          content: `Backend error: ${result.error ?? "unknown"}`,
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+    const data = result.data as {
+      response: string;
+      needs_human: boolean;
+      matched_properties: Property[];
+    };
+
+    const properties: Property[] = (data.matched_properties || []).map((p: any) => ({
+      id: String(p.id ?? p.property_id ?? Math.random().toString(36).slice(2)),
+      title: `Property ${p.property_id ?? p.id}`,
+      area: "Dubai",
+      price: 0,
+      bedrooms: 0,
+      bathrooms: 0,
+      size_sqft: 0,
+      images: ["https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"],
+      map_lat: 25.2,
+      map_lng: 55.27,
+      amenities: [],
+      match_score: (p as { match_score?: number }).match_score,
+    }));
+
+    if (properties.length) setMapProperties(properties);
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: String(Date.now() + 1),
+        role: "assistant",
+        content: data.response,
+        properties: properties.length ? properties : undefined,
+        needsHuman: data.needs_human,
+        timestamp: new Date(),
+      },
+    ]);
+    if (data.needs_human) setNeedsHuman(true);
+  }, []);
+
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: String(Date.now()),
       role: "user",
       content: text,
       timestamp: new Date(),
     };
-
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
 
-    // Simulate AI response (replace with actual API call)
-    setTimeout(() => {
-      let response: Message;
+    // First-time path: if we don't have a lead yet, auto-ingest with the
+    // collected form values (or anonymous defaults) and immediately continue.
+    if (!leadId) {
+      const ingest = await leadsApi.ingest({
+        source: "website",
+        preferred_language: language,
+        ...ingestForm,
+        first_name: ingestForm.first_name || undefined,
+        phone: ingestForm.phone || undefined,
+        email: ingestForm.email || undefined,
+        budget_min: ingestForm.budget_min ? Number(ingestForm.budget_min) : undefined,
+        budget_max: ingestForm.budget_max ? Number(ingestForm.budget_max) : undefined,
+        area_preference: ingestForm.area_preference
+          ? ingestForm.area_preference.split(",").map((s) => s.trim()).filter(Boolean)
+          : [],
+        message: text,
+      });
 
-      if (text.toLowerCase().includes("downtown") || text.toLowerCase().includes("apartment")) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content:
-            "Perfect! I found some amazing properties in Downtown Dubai. Here are the top matches:",
-          properties: MOCK_PROPERTIES,
-          timestamp: new Date(),
-        };
-      } else if (text.toLowerCase().includes("budget") || text.toLowerCase().includes("price")) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content:
-            "What's your budget range? I can filter properties from AED 1M to AED 50M+",
-          timestamp: new Date(),
-        };
-      } else if (text.toLowerCase().includes("visit") || text.toLowerCase().includes("viewing")) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content:
-            "I'd be happy to schedule a site visit! Our specialist will contact you within 30 minutes to confirm the appointment. 📅",
-          timestamp: new Date(),
-        };
+      if (ingest.data) {
+        const id = (ingest.data as { lead_id: string }).lead_id;
+        setLeadId(id);
+        setShowIngestForm(false);
+        await continueChat(id, text);
       } else {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content:
-            "I understand. To help you better, could you tell me:\n\n1. Are you looking to buy or rent?\n2. Which area in Dubai interests you?\n3. What's your budget range?",
-          timestamp: new Date(),
-        };
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now() + 1),
+            role: "assistant",
+            content: `Sorry, I couldn't reach the backend: ${ingest.error ?? "unknown"}`,
+            timestamp: new Date(),
+          },
+        ]);
       }
-
-      setMessages((prev) => [...prev, response]);
       setIsLoading(false);
-    }, 1500);
+      return;
+    }
+
+    await continueChat(leadId, text);
+    setIsLoading(false);
   };
 
   const quickReplies = [
-    { label: "Buy", icon: Home },
-    { label: "Rent", icon: Building2 },
-    { label: "Invest", icon: Globe },
-    { label: "AED 1-3M", icon: null },
-    { label: "AED 3-5M", icon: null },
-    { label: "AED 5M+", icon: null },
+    { label: "Buy apartment", icon: Home },
+    { label: "Rent villa", icon: Building2 },
+    { label: "Invest off-plan", icon: Globe },
+    { label: "Downtown Dubai", icon: null },
+    { label: "Dubai Marina", icon: null },
+    { label: "Palm Jumeirah", icon: null },
   ];
 
+  const onAgentMessageFromVoice = (text: string, properties?: Property[]) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        role: "assistant",
+        content: text,
+        properties,
+        timestamp: new Date(),
+      },
+    ]);
+    if (properties && properties.length) setMapProperties(properties);
+  };
+
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
+    <div className="flex h-[calc(100vh-3.5rem)] bg-gray-50">
+      {/* ─── Sidebar ─── */}
       <div className="w-80 bg-white border-r border-gray-200 hidden lg:flex flex-col">
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
               <Building2 className="w-5 h-5 text-white" />
-            </div
-            <div
-            >
+            </div>
+            <div>
               <h1 className="font-bold text-gray-900">Dubai Real Estate AI</h1>
               <p className="text-xs text-gray-500">Powered by Ali</p>
-            </div
+            </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          {needsHuman && (
+            <div className="mb-4 p-3 rounded-xl bg-green-50 border border-green-100 text-left">
+              <div className="flex items-center gap-2 text-green-700 font-semibold text-sm mb-1">
+                <Sparkles className="w-4 h-4" />
+                Specialist requested
+              </div>
+              <p className="text-xs text-green-700">
+                A broker has been assigned and will reach out within 30 minutes.
+              </p>
+            </div>
+          )}
+
           <div className="mb-4">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
               Quick Filters
@@ -571,8 +690,8 @@ export default function ChatPage() {
                   </button>
                 )
               )}
-            </div
-          </div
+            </div>
+          </div>
 
           <div className="mb-4">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -589,9 +708,33 @@ export default function ChatPage() {
                   {type}
                 </button>
               ))}
-            </div
-          </div
-        </div
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+              Budget Tiers
+            </h3>
+            <div className="space-y-1">
+              {[
+                { label: "AED 1-3M", min: 1_000_000, max: 3_000_000 },
+                { label: "AED 3-5M", min: 3_000_000, max: 5_000_000 },
+                { label: "AED 5M+", min: 5_000_000, max: 50_000_000 },
+              ].map((b) => (
+                <button
+                  key={b.label}
+                  onClick={() =>
+                    sendMessage(`My budget is between ${b.label.replace("AED ", "")} AED`)
+                  }
+                  className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition"
+                >
+                  <span className="inline-block w-3 h-3 mr-2 text-center text-gray-400">•</span>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <div className="p-4 border-t border-gray-100">
           <button
@@ -601,10 +744,10 @@ export default function ChatPage() {
             <Mic className="w-4 h-4" />
             Voice Conversation
           </button>
-        </div
-      </div
+        </div>
+      </div>
 
-      {/* Main Chat Area */}
+      {/* ─── Main Chat Area ─── */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
         <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
@@ -612,15 +755,16 @@ export default function ChatPage() {
             <div className="relative">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
                 <Bot className="w-5 h-5 text-white" />
-              </div
+              </div>
               <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
-            </div
-            <div
-            >
+            </div>
+            <div>
               <h2 className="font-semibold text-gray-900">Ali</h2>
-              <p className="text-xs text-green-600">Online</p>
-            </div
-          </div
+              <p className="text-xs text-green-600">
+                {leadId ? `Lead ${leadId.slice(0, 8)}…` : "Online"}
+              </p>
+            </div>
+          </div>
 
           <div className="flex items-center gap-2">
             <button
@@ -634,9 +778,72 @@ export default function ChatPage() {
               className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
             >
               <Mic className="w-5 h-5" />
-            </button
-          </div
-        </div
+            </button>
+          </div>
+        </div>
+
+        {/* Optional inline lead-capture form for first-time visitors */}
+        <AnimatePresence>
+          {showIngestForm && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="bg-blue-50 border-b border-blue-100 px-6 py-4 overflow-hidden"
+            >
+              <form onSubmit={submitIngest} className="max-w-4xl">
+                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <Sparkles className="w-3 h-3" /> Tell us about you (optional — speeds up matching)
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <input
+                    placeholder="First name"
+                    value={ingestForm.first_name}
+                    onChange={(e) =>
+                      setIngestForm({ ...ingestForm, first_name: e.target.value })
+                    }
+                    className="px-3 py-2 text-sm border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <input
+                    placeholder="Phone"
+                    value={ingestForm.phone}
+                    onChange={(e) => setIngestForm({ ...ingestForm, phone: e.target.value })}
+                    className="px-3 py-2 text-sm border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <input
+                    placeholder="Budget (AED)"
+                    type="number"
+                    value={ingestForm.budget_max}
+                    onChange={(e) =>
+                      setIngestForm({ ...ingestForm, budget_max: e.target.value })
+                    }
+                    className="px-3 py-2 text-sm border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <input
+                    placeholder="Areas (comma-separated)"
+                    value={ingestForm.area_preference}
+                    onChange={(e) =>
+                      setIngestForm({ ...ingestForm, area_preference: e.target.value })
+                    }
+                    className="px-3 py-2 text-sm border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-xs text-blue-600">
+                    You can skip this — just type below and we'll register you as a lead.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowIngestForm(false)}
+                    className="text-xs text-blue-700 hover:underline"
+                  >
+                    Skip
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
@@ -651,7 +858,6 @@ export default function ChatPage() {
                   msg.role === "user" ? "flex-row-reverse" : "flex-row"
                 )}
               >
-                {/* Avatar */}
                 <div
                   className={cn(
                     "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
@@ -665,15 +871,9 @@ export default function ChatPage() {
                   ) : (
                     <Bot className="w-4 h-4 text-white" />
                   )}
-                </div
+                </div>
 
-                {/* Message Content */}
-                <div
-                  className={cn(
-                    "max-w-[80%] space-y-3",
-                    msg.role === "user" ? "items-end" : "items-start"
-                  )}
-                >
+                <div className={cn("max-w-[80%] space-y-3", msg.role === "user" ? "items-end" : "items-start")}>
                   <div
                     className={cn(
                       "px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
@@ -686,11 +886,10 @@ export default function ChatPage() {
                       <span key={i}>
                         {line}
                         {i < msg.content.split("\n").length - 1 && <br />}
-                      </span
+                      </span>
                     ))}
-                  </div
+                  </div>
 
-                  {/* Property Cards */}
                   {msg.properties && msg.properties.length > 0 && (
                     <div className="space-y-3">
                       {msg.properties.map((prop) => (
@@ -699,11 +898,12 @@ export default function ChatPage() {
                           property={prop}
                           onViewMap={(p) => {
                             setMapProperty(p);
+                            setMapProperties(msg.properties || []);
                             setShowMap(true);
                           }}
                         />
                       ))}
-                    </div
+                    </div>
                   )}
 
                   <span className="text-xs text-gray-400 px-1">
@@ -711,8 +911,8 @@ export default function ChatPage() {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
-                  </span
-                </div
+                  </span>
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -724,12 +924,12 @@ export default function ChatPage() {
               className="flex items-center gap-2 text-gray-400 text-sm"
             >
               <Loader2 className="w-4 h-4 animate-spin" />
-              Ali is typing...
+              Ali is thinking...
             </motion.div>
           )}
 
           <div ref={messagesEndRef} />
-        </div
+        </div>
 
         {/* Quick Replies */}
         {messages.length < 3 && (
@@ -744,8 +944,8 @@ export default function ChatPage() {
                   {reply.label}
                 </button>
               ))}
-            </div
-          </div
+            </div>
+          </div>
         )}
 
         {/* Input */}
@@ -756,7 +956,7 @@ export default function ChatPage() {
               className="p-2.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition"
             >
               <Mic className="w-5 h-5" />
-            </button
+            </button>
 
             <div className="flex-1 relative">
               <input
@@ -767,7 +967,7 @@ export default function ChatPage() {
                 placeholder="Ask about properties, areas, prices..."
                 className="w-full px-4 py-3 bg-gray-100 border-0 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition"
               />
-            </div
+            </div>
 
             <button
               onClick={() => sendMessage(input)}
@@ -780,16 +980,16 @@ export default function ChatPage() {
               )}
             >
               <Send className="w-5 h-5" />
-            </button
-          </div
-        </div
-      </div
+            </button>
+          </div>
+        </div>
+      </div>
 
-      {/* Modals */}
+      {/* ─── Modals ─── */}
       <AnimatePresence>
         {showMap && (
           <PropertyMap
-            properties={MOCK_PROPERTIES}
+            properties={mapProperties}
             selectedProperty={mapProperty}
             onClose={() => {
               setShowMap(false);
@@ -800,8 +1000,15 @@ export default function ChatPage() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showVoice && <VoiceModal isOpen={showVoice} onClose={() => setShowVoice(false)} />}
+        {showVoice && (
+          <VoiceModal
+            isOpen={showVoice}
+            onClose={() => setShowVoice(false)}
+            leadId={leadId}
+            onAgentMessage={onAgentMessageFromVoice}
+          />
+        )}
       </AnimatePresence>
-    </div
+    </div>
   );
 }

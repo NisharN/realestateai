@@ -1,0 +1,10 @@
+{
+  "source": "propertyfinder",
+  "scraped_at": "2026-07-29T11:10:19.951903+00:00",
+  "property_type": "rent_apartment",
+  "area_filter": null,
+  "pages_requested": 20,
+  "detail_enriched": true,
+  "count": 0,
+  "listings": []
+}

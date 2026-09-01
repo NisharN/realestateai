@@ -1,11 +1,18 @@
 """API routes for lead management."""
 import logging
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.database import get_db, LeadRepository, BrokerRepository, ActivityRepository
+from app.database import (
+    get_db,
+    get_lead_repository,
+    get_broker_repository,
+    get_activity_repository,
+)
 from app.agents.orchestrator import agent_graph, AgentState
+from app.auth import RequestContext, get_request_context
 from app.models.lead import LeadCreate, LeadResponse, LeadUpdate
 
 logger = logging.getLogger(__name__)
@@ -41,12 +48,13 @@ class LeadIngestResponse(BaseModel):
 @router.post("/ingest", response_model=LeadIngestResponse)
 async def ingest_lead(
     request: LeadIngestRequest,
-    db=Depends(get_db)
+    context: RequestContext = Depends(get_request_context),
+    db=Depends(get_db),
 ):
     """Ingest a new lead and trigger AI qualification pipeline."""
     try:
         # Create lead in database
-        lead_repo = LeadRepository(db)
+        lead_repo = get_lead_repository(context.workspace_id)
 
         lead_data = {
             "source": request.source,
@@ -71,6 +79,7 @@ async def ingest_lead(
         # Initialize agent state
         initial_state: AgentState = {
             "lead_id": lead_id,
+            "workspace_id": context.workspace_id,
             "lead_data": lead_data,
             "messages": [],
             "language": request.preferred_language,
@@ -104,7 +113,7 @@ async def ingest_lead(
         })
 
         # Log activity
-        activity_repo = ActivityRepository(db)
+        activity_repo = get_activity_repository(context.workspace_id)
         await activity_repo.create({
             "lead_id": lead_id,
             "activity_type": "ai_qualification",
@@ -118,7 +127,7 @@ async def ingest_lead(
         if result.get("needs_human"):
             next_action = "broker_handoff"
             # Try to assign broker
-            broker_repo = BrokerRepository(db)
+            broker_repo = get_broker_repository(context.workspace_id)
             broker = await broker_repo.get_available_broker(
                 specialization=lead_data.get("area_preference")
             )
@@ -146,22 +155,29 @@ async def list_leads(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db=Depends(get_db)
+    context: RequestContext = Depends(get_request_context),
+    db=Depends(get_db),
 ):
     """List leads with optional filtering."""
-    lead_repo = LeadRepository(db)
+    lead_repo = get_lead_repository(context.workspace_id)
+    assigned_broker_id = context.broker_id if context.role.value == "agent" else None
     if status:
-        return await lead_repo.list_by_status(status, limit, offset)
-    # Get all leads (in production, add pagination)
-    return await lead_repo.list_by_status("new", limit, offset)
+        return await lead_repo.list_by_status(status, limit, offset, assigned_broker_id)
+    # No status filter — surface every known status so the dashboard isn't empty
+    merged: list = []
+    for s in ("new", "contacted", "qualified", "nurture", "closed", "lost"):
+        merged.extend(await lead_repo.list_by_status(s, limit, offset, assigned_broker_id))
+    return merged[:limit]
 
 
 @router.get("/{lead_id}", response_model=LeadResponse)
-async def get_lead(lead_id: str, db=Depends(get_db)):
+async def get_lead(lead_id: str, context: RequestContext = Depends(get_request_context), db=Depends(get_db)):
     """Get lead by ID."""
-    lead_repo = LeadRepository(db)
+    lead_repo = get_lead_repository(context.workspace_id)
     lead = await lead_repo.get_by_id(lead_id)
     if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not context.can_access_lead(lead):
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
 
@@ -170,13 +186,16 @@ async def get_lead(lead_id: str, db=Depends(get_db)):
 async def send_message(
     lead_id: str,
     message: dict,
-    db=Depends(get_db)
+    context: RequestContext = Depends(get_request_context),
+    db=Depends(get_db),
 ):
     """Send a message to a lead (continues conversation)."""
     try:
-        lead_repo = LeadRepository(db)
+        lead_repo = get_lead_repository(context.workspace_id)
         lead = await lead_repo.get_by_id(lead_id)
         if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        if not context.can_access_lead(lead):
             raise HTTPException(status_code=404, detail="Lead not found")
 
         from langchain_core.messages import HumanMessage, AIMessage
@@ -184,6 +203,7 @@ async def send_message(
         # Build state from lead history
         state: AgentState = {
             "lead_id": lead_id,
+            "workspace_id": context.workspace_id,
             "lead_data": lead,
             "messages": [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"])
                         for msg in lead.get("conversation_history", [])],
@@ -211,12 +231,12 @@ async def send_message(
                 "role": "ai" if i % 2 else "user",
                 "content": msg.content if hasattr(msg, "content") else str(msg)
             } for i, msg in enumerate(result.get("messages", []))],
-            "last_contact_at": "now()"
+            "last_contact_at": datetime.utcnow().isoformat()
         })
 
         # Check for handoff
         if result.get("needs_human"):
-            broker_repo = BrokerRepository(db)
+            broker_repo = get_broker_repository(context.workspace_id)
             if not lead.get("assigned_broker"):
                 broker = await broker_repo.get_available_broker()
                 if broker:
@@ -242,11 +262,12 @@ async def send_message(
 async def assign_lead(
     lead_id: str,
     broker_id: str,
-    db=Depends(get_db)
+    context: RequestContext = Depends(get_request_context),
+    db=Depends(get_db),
 ):
     """Manually assign lead to broker."""
-    lead_repo = LeadRepository(db)
-    broker_repo = BrokerRepository(db)
+    lead_repo = get_lead_repository(context.workspace_id)
+    broker_repo = get_broker_repository(context.workspace_id)
 
     lead = await lead_repo.get_by_id(lead_id)
     if not lead:

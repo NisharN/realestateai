@@ -1,7 +1,7 @@
 """Lead Pydantic models."""
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LeadCreate(BaseModel):
@@ -38,12 +38,11 @@ class LeadResponse(BaseModel):
     assigned_broker: Optional[str] = None
     scraped_data: Optional[Dict[str, Any]] = None
     conversation_history: Optional[List[Dict[str, Any]]] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    last_contact_at: Optional[datetime] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_contact_at: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LeadUpdate(BaseModel):

@@ -1,5 +1,29 @@
 version: "3.8"
 
+# Single-tenant deployment: one stack per brokerage (see PILOT.md).
+# WORKSPACE_ID identifies which brokerage this instance serves.
+#
+# Data modes default to "mock" so the stack is fully demoable with no API keys
+# and no pending approvals. Flip an individual source to live once its
+# credentials exist (WhatsApp needs Meta Business Verification, ~2-4 weeks).
+
+x-backend-env: &backend-env
+  APP_ENV: production
+  APP_PORT: 8000
+  WORKSPACE_ID: ${WORKSPACE_ID:-00000000-0000-0000-0000-000000000001}
+  WORKSPACE_NAME: ${WORKSPACE_NAME:-Demo Brokerage}
+  DATA_MODE_PROPERTIES: ${DATA_MODE_PROPERTIES:-mock}
+  DATA_MODE_WHATSAPP: ${DATA_MODE_WHATSAPP:-mock}
+  DATA_MODE_DLD: ${DATA_MODE_DLD:-mock}
+  SUPABASE_URL: ${SUPABASE_URL:-}
+  SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  RAPIDAPI_UAE_REAL_ESTATE_KEY: ${RAPIDAPI_UAE_REAL_ESTATE_KEY:-}
+  WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+  WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+  META_APP_SECRET: ${META_APP_SECRET:-}
+  REDIS_URL: redis://redis:6379/0
+
 services:
   backend:
     build:
@@ -7,19 +31,43 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      - APP_ENV=production
-      - APP_PORT=8000
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN}
-      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}
-      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID}
+    environment: *backend-env
     volumes:
       - ./backend/app:/app/app
       - ./backend/models:/app/models
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Executes scheduled ingestion and the reminders engine. Without this
+  # service, creating a schedule succeeds but nothing ever runs it — which is
+  # exactly the bug that was reported.
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
+    environment: *backend-env
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+
+  # The clock. Enqueues due ingestion schedules every 60s and runs the
+  # workflow templates every 5 minutes.
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    environment: *backend-env
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - redis
+      - celery-worker
     restart: unless-stopped
 
   frontend:
@@ -29,8 +77,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_MAPBOX_TOKEN=${MAPBOX_ACCESS_TOKEN}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       - backend
     restart: unless-stopped
@@ -40,19 +87,3 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
-
-  # Optional: n8n for workflow automation
-  n8n:
-    image: n8nio/n8n:latest
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=changeme
-    volumes:
-      - n8n_data:/home/node/.n8n
-    restart: unless-stopped
-
-volumes:
-  n8n_data:

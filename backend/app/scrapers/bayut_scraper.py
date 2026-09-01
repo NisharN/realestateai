@@ -1,7 +1,6 @@
 """Bayut.com scraper for Dubai real estate listings."""
-import asyncio
-import json
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
 
@@ -71,8 +70,21 @@ class BayutScraper(BaseScraper):
 
             logger.info(f"Scraping Bayut: {url}")
 
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as nav_err:
+                logger.warning(f"Bayut goto slow-fallback: {nav_err}")
+                try:
+                    await page.goto(url, wait_until="load", timeout=30000)
+                except Exception:
+                    return listings
+
             await self.random_delay(3, 6)
+            block_reason = await self.detect_block(page, "Bayut")
+            if block_reason:
+                logger.warning(block_reason)
+                await page.close()
+                return listings
             await self.scroll_page(page, scrolls=5)
 
             # Extract listings using multiple selectors (Bayut changes these often)
@@ -95,7 +107,9 @@ class BayutScraper(BaseScraper):
                 try:
                     listing = await self._parse_card(card)
                     if listing:
-                        listings.append(self.normalize_property(listing))
+                        normalized = self.normalize_property(listing)
+                        if self.is_legit_listing(normalized):
+                            listings.append(normalized)
                 except Exception as e:
                     logger.warning(f"Error parsing card: {e}")
                     continue
@@ -105,8 +119,15 @@ class BayutScraper(BaseScraper):
                 next_url = f"{url}&page={p}"
                 logger.info(f"Scraping page {p}: {next_url}")
 
-                await page.goto(next_url, wait_until="networkidle", timeout=60000)
+                try:
+                    await page.goto(next_url, wait_until="domcontentloaded", timeout=45000)
+                except Exception:
+                    break
                 await self.random_delay(3, 6)
+                block_reason = await self.detect_block(page, "Bayut")
+                if block_reason:
+                    logger.warning(block_reason)
+                    break
                 await self.scroll_page(page, scrolls=5)
 
                 for selector in selectors:
@@ -118,7 +139,9 @@ class BayutScraper(BaseScraper):
                     try:
                         listing = await self._parse_card(card)
                         if listing:
-                            listings.append(self.normalize_property(listing))
+                            normalized = self.normalize_property(listing)
+                            if self.is_legit_listing(normalized):
+                                listings.append(normalized)
                     except Exception as e:
                         continue
 
@@ -133,39 +156,54 @@ class BayutScraper(BaseScraper):
     async def _parse_card(self, card) -> Optional[Dict[str, Any]]:
         """Parse a single property card element."""
         try:
-            # Title
-            title_el = await card.query_selector('h2, [data-testid="title"], .title, a[aria-label]')
-            title = await title_el.inner_text() if title_el else ""
+            text = " ".join((await card.inner_text()).split())
 
-            # Price
-            price_el = await card.query_selector('[data-testid="price"], .price, .c4fc20ba')
-            price_text = await price_el.inner_text() if price_el else ""
+            anchors = await card.query_selector_all("a[href]")
+            href = ""
+            for anchor in anchors:
+                candidate = await anchor.get_attribute("href")
+                if candidate and "/property/" in candidate:
+                    href = candidate
+                    break
+                if not href and candidate:
+                    href = candidate
 
-            # Location/Area
-            location_el = await card.query_selector('[data-testid="location"], .location, [aria-label*="location"]')
-            location = await location_el.inner_text() if location_el else ""
+            if not href:
+                return None
 
-            # Details (beds, baths, size)
-            details = await card.query_selector_all('[data-testid="property-details"] span, .details span')
-            beds, baths, size = None, None, None
-            for detail in details:
-                text = await detail.inner_text()
-                if "bed" in text.lower():
-                    beds = text
-                elif "bath" in text.lower():
-                    baths = text
-                elif "sqft" in text.lower() or "sqm" in text.lower():
-                    size = text
+            lines = [line.strip() for line in (await card.inner_text()).splitlines() if line.strip()]
 
-            # Image
-            img_el = await card.query_selector('img')
+            title = ""
+            area = ""
+            for idx, line in enumerate(lines):
+                if line.startswith("AED"):
+                    for candidate in lines[idx + 1 : idx + 7]:
+                        lower = candidate.lower()
+                        if len(candidate) > 10 and not lower.startswith(("area", "handover", "payment plan", "email", "call")):
+                            title = candidate
+                            break
+                        if not area and "," in candidate and "dubai" in lower:
+                            area = candidate
+
+            if not area:
+                for candidate in lines:
+                    if "," in candidate and "dubai" in candidate.lower():
+                        area = candidate
+                        break
+
+            price_match = re.search(r"AED\s*([\d,]+)", text)
+            price_text = price_match.group(1) if price_match else ""
+
+            sqft_match = re.search(r"(\d[\d,]*)\s*sq\s*ft", text, flags=re.IGNORECASE)
+            size = sqft_match.group(1) if sqft_match else None
+
+            nums = self.extract_numbers(text)
+            beds = nums[0] if len(nums) >= 1 else None
+            baths = nums[1] if len(nums) >= 2 else None
+
+            img_el = await card.query_selector("img")
             img_url = await img_el.get_attribute("src") if img_el else ""
 
-            # URL
-            link_el = await card.query_selector('a[href]')
-            href = await link_el.get_attribute("href") if link_el else ""
-
-            # Property type from title
             property_type = "apartment"
             title_lower = title.lower()
             if "villa" in title_lower:
@@ -176,11 +214,11 @@ class BayutScraper(BaseScraper):
                 property_type = "townhouse"
 
             return {
-                "id": href.split("/")[-2] if "/" in href else "",
+                "id": href.rstrip("/").split("/")[-1],
                 "url": urljoin(self.BASE_URL, href) if href else "",
                 "title": title.strip(),
                 "price": price_text,
-                "area": location.strip(),
+                "area": area.strip(),
                 "property_type": property_type,
                 "bedrooms": beds,
                 "bathrooms": baths,
@@ -227,8 +265,8 @@ class BayutScraper(BaseScraper):
                 text = await script.inner_text()
                 if "latitude" in text.lower() or "longitude" in text.lower():
                     import re
-                    lat_match = re.search(r'latitude["']?\s*[:=]\s*([\d.]+)', text)
-                    lng_match = re.search(r'longitude["']?\s*[:=]\s*([\d.]+)', text)
+                    lat_match = re.search(r'latitude["\']?\s*[:=]\s*([\d.]+)', text)
+                    lng_match = re.search(r'longitude["\']?\s*[:=]\s*([\d.]+)', text)
                     if lat_match:
                         lat = float(lat_match.group(1))
                     if lng_match:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
@@ -16,7 +16,14 @@ import {
   Filter,
   Search,
   MoreHorizontal,
+  type LucideIcon,
 } from "lucide-react";
+import {
+  dashboardApi,
+  leadsApi,
+  type ApiLead,
+  type DashboardSummary,
+} from "@/lib/api";
 
 // Types
 interface Lead {
@@ -38,129 +45,67 @@ interface StatCard {
   value: string;
   change: string;
   trend: "up" | "down";
-  icon: any;
+  icon: LucideIcon;
 }
 
-// Mock data
-const STATS: StatCard[] = [
-  {
-    title: "Total Leads",
-    value: "1,284",
-    change: "+12.5%",
-    trend: "up",
-    icon: Users,
-  },
-  {
-    title: "Qualified Leads",
-    value: "342",
-    change: "+8.2%",
-    trend: "up",
-    icon: TrendingUp,
-  },
-  {
-    title: "Properties Listed",
-    value: "567",
-    change: "+23.1%",
-    trend: "up",
-    icon: Building2,
-  },
-  {
-    title: "Revenue Pipeline",
-    value: "AED 45.2M",
-    change: "+15.3%",
-    trend: "up",
-    icon: DollarSign,
-  },
-];
+/** Map an API lead onto the shape this dashboard renders. */
+function toDashboardLead(lead: ApiLead): Lead {
+  const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ").trim();
+  return {
+    id: lead.id,
+    name: name || "Unnamed lead",
+    email: lead.email ?? "",
+    phone: lead.phone ?? "",
+    status: lead.status ?? "new",
+    intent_score: lead.intent_score ?? 0,
+    source: lead.source ?? "unknown",
+    assigned_broker: lead.assigned_broker ?? null,
+    created_at: lead.created_at ?? "",
+    budget: formatBudget(lead),
+    area: lead.area_preference?.[0] ?? "—",
+  };
+}
 
-const MOCK_LEADS: Lead[] = [
-  {
-    id: "1",
-    name: "Ahmed Al-Rashid",
-    email: "ahmed@example.com",
-    phone: "+971501234567",
-    status: "qualified",
-    intent_score: 85,
-    source: "website",
-    assigned_broker: "Sarah Johnson",
-    created_at: "2024-01-15",
-    budget: "AED 3-5M",
-    area: "Downtown Dubai",
-  },
-  {
-    id: "2",
-    name: "Maria Gonzalez",
-    email: "maria@example.com",
-    phone: "+971502345678",
-    status: "new",
-    intent_score: 45,
-    source: "whatsapp",
-    assigned_broker: null,
-    created_at: "2024-01-16",
-    budget: "AED 1-2M",
-    area: "Dubai Marina",
-  },
-  {
-    id: "3",
-    name: "Raj Patel",
-    email: "raj@example.com",
-    phone: "+971503456789",
-    status: "contacted",
-    intent_score: 72,
-    source: "bayut",
-    assigned_broker: "Ahmed Al-Rashid",
-    created_at: "2024-01-14",
-    budget: "AED 5M+",
-    area: "Palm Jumeirah",
-  },
-  {
-    id: "4",
-    name: "Emma Wilson",
-    email: "emma@example.com",
-    phone: "+971504567890",
-    status: "viewing_scheduled",
-    intent_score: 92,
-    source: "propertyfinder",
-    assigned_broker: "Sarah Johnson",
-    created_at: "2024-01-13",
-    budget: "AED 2-3M",
-    area: "Business Bay",
-  },
-  {
-    id: "5",
-    name: "Mohammed Khan",
-    email: "mohammed@example.com",
-    phone: "+971505678901",
-    status: "negotiating",
-    intent_score: 95,
-    source: "referral",
-    assigned_broker: "Ahmed Al-Rashid",
-    created_at: "2024-01-10",
-    budget: "AED 8M+",
-    area: "Emirates Hills",
-  },
-];
+/** Render a budget without inventing a currency or period we weren't told. */
+function formatBudget(lead: ApiLead): string {
+  const { budget_min: min, budget_max: max } = lead;
+  if (!min && !max) return "Not stated";
+  const currency = lead.budget_currency ?? "AED";
+  const suffix =
+    lead.budget_period === "year"
+      ? "/yr"
+      : lead.budget_period === "month"
+      ? "/mo"
+      : "";
+  const compact = (value: number) =>
+    value >= 1_000_000
+      ? `${(value / 1_000_000).toFixed(1)}M`
+      : `${Math.round(value / 1000)}K`;
+  if (min && max && min !== max) {
+    return `${currency} ${compact(min)}-${compact(max)}${suffix}`;
+  }
+  return `${currency} ${compact((max ?? min) as number)}${suffix}`;
+}
 
+
+// These must match the statuses the backend actually stores (see
+// api/leads.py list_leads) — otherwise a lead renders with a blank status pill.
 const STATUS_COLORS: Record<string, string> = {
   new: "bg-gray-100 text-gray-700",
-  qualified: "bg-blue-100 text-blue-700",
   contacted: "bg-yellow-100 text-yellow-700",
-  viewing_scheduled: "bg-purple-100 text-purple-700",
-  negotiating: "bg-orange-100 text-orange-700",
-  closed_won: "bg-green-100 text-green-700",
-  closed_lost: "bg-red-100 text-red-700",
-  nurture: "bg-gray-100 text-gray-500",
+  qualified: "bg-blue-100 text-blue-700",
+  nurture: "bg-purple-100 text-purple-600",
+  closed: "bg-green-100 text-green-700",
+  lost: "bg-red-100 text-red-700",
 };
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
-  qualified: "Qualified",
   contacted: "Contacted",
-  viewing_scheduled: "Viewing Scheduled",
-  negotiating: "Negotiating",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
+  qualified: "Qualified",
   nurture: "Nurture",
+  closed: "Closed",
+  lost: "Lost",
 };
 
 function StatCardComponent({ stat }: { stat: StatCard }) {
@@ -194,14 +139,57 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
   );
 }
 
-function PipelineBoard() {
+/** Real source mix, derived from the loaded leads rather than hardcoded. */
+function leadSourceBreakdown(
+  leads: Lead[]
+): { source: string; count: number; percentage: number }[] {
+  if (leads.length === 0) return [];
+  const counts = new Map<string, number>();
+  for (const lead of leads) {
+    const label = SOURCE_LABELS[lead.source] ?? lead.source;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([source, count]) => ({
+      source,
+      count,
+      percentage: Math.round((count / leads.length) * 100),
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  propertyfinder: "Property Finder",
+  bayut: "Bayut",
+  whatsapp: "WhatsApp",
+  website_form: "Website",
+  crm_import: "CRM import",
+  referral: "Referral",
+  walk_in: "Walk-in",
+  instagram: "Instagram",
+  google_ads: "Google Ads",
+};
+
+function LoadingPanel({ label }: { label: string }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
+      <div className="inline-block w-6 h-6 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin mb-3" />
+      <p className="text-sm text-gray-500">{label}</p>
+    </div>
+  );
+}
+
+function PipelineBoard({ leads }: { leads: Lead[] }) {
+  // Columns and their counts both come from the same live lead list. They used
+  // to be hardcoded, which meant the board could show "12 New" above zero
+  // actual cards — the inconsistency a broker would spot immediately.
   const columns = [
-    { id: "new", label: "New", count: 12 },
-    { id: "qualified", label: "Qualified", count: 8 },
-    { id: "contacted", label: "Contacted", count: 6 },
-    { id: "viewing_scheduled", label: "Viewing", count: 4 },
-    { id: "negotiating", label: "Negotiating", count: 3 },
-    { id: "closed_won", label: "Closed", count: 2 },
+    { id: "new", label: "New" },
+    { id: "contacted", label: "Contacted" },
+    { id: "qualified", label: "Qualified" },
+    { id: "nurture", label: "Nurture" },
+    { id: "closed", label: "Closed" },
+    { id: "lost", label: "Lost" },
   ];
 
   return (
@@ -218,11 +206,11 @@ function PipelineBoard() {
                   {col.label}
                 </h3>
                 <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
-                  {col.count}
+                  {leads.filter((l) => l.status === col.id).length}
                 </span>
               </div>
               <div className="space-y-2">
-                {MOCK_LEADS.filter((l) => l.status === col.id).map((lead) => (
+                {leads.filter((l) => l.status === col.id).map((lead) => (
                   <motion.div
                     key={lead.id}
                     whileHover={{ scale: 1.02 }}
@@ -265,11 +253,11 @@ function PipelineBoard() {
   );
 }
 
-function LeadsTable() {
+function LeadsTable({ leads }: { leads: Lead[] }) {
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const filtered = MOCK_LEADS.filter((l) => {
+  const filtered = leads.filter((l) => {
     const matchesSearch =
       l.name.toLowerCase().includes(filter.toLowerCase()) ||
       l.email.toLowerCase().includes(filter.toLowerCase()) ||
@@ -425,11 +413,51 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "pipeline" | "leads">(
     "overview"
   );
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    dashboardApi.summary().then((result) => {
+      if (!active) return;
+      if (result.data) setSummary(result.data);
+      else setSummaryError(result.error ?? "Unable to load dashboard");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // The pipeline board and leads table used to render a hardcoded MOCK_LEADS
+  // array directly beneath live stat cards — so the counts were real but the
+  // rows underneath them were fiction. Both now read the same API.
+  useEffect(() => {
+    let active = true;
+    leadsApi.list({ limit: 100 }).then((result) => {
+      if (!active) return;
+      setLeadsLoading(false);
+      if (result.data) setLeads(result.data.map(toDashboardLead));
+      else setLeadsError(result.error ?? "Unable to load leads");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const stats: StatCard[] = [
+    { title: "Total Leads", value: summary?.total_leads.toLocaleString() ?? "—", change: "Live", trend: "up", icon: Users },
+    { title: "Qualified Leads", value: summary?.qualified_leads.toLocaleString() ?? "—", change: "Live", trend: "up", icon: TrendingUp },
+    { title: "Closed Leads", value: summary?.closed_leads.toLocaleString() ?? "—", change: "Live", trend: "up", icon: Building2 },
+    { title: "Average Intent", value: summary ? `${summary.average_intent_score}%` : "—", change: "Live", trend: "up", icon: DollarSign },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 z-10">
+      <aside className="fixed left-0 top-14 h-[calc(100vh-3.5rem)] w-64 bg-white border-r border-gray-200 z-10">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
@@ -513,7 +541,12 @@ export default function DashboardPage() {
           {activeTab === "overview" && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                {STATS.map((stat) => (
+                {summaryError && (
+                  <div role="alert" className="md:col-span-2 lg:col-span-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">
+                    {summaryError}
+                  </div>
+                )}
+                {stats.map((stat) => (
                   <StatCardComponent key={stat.title} stat={stat} />
                 ))}
               </div>
@@ -580,14 +613,7 @@ export default function DashboardPage() {
                     Lead Sources
                   </h2>
                   <div className="space-y-4">
-                    {[
-                      { source: "Website", count: 452, percentage: 35 },
-                      { source: "WhatsApp", count: 312, percentage: 24 },
-                      { source: "Bayut", count: 198, percentage: 15 },
-                      { source: "PropertyFinder", count: 165, percentage: 13 },
-                      { source: "Referrals", count: 98, percentage: 8 },
-                      { source: "Other", count: 59, percentage: 5 },
-                    ].map((item) => (
+                    {leadSourceBreakdown(leads).map((item) => (
                       <div key={item.source}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm text-gray-700">
@@ -611,8 +637,15 @@ export default function DashboardPage() {
             </>
           )}
 
-          {activeTab === "pipeline" && <PipelineBoard />}
-          {activeTab === "leads" && <LeadsTable />}
+          {leadsError && activeTab !== "overview" && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+              {leadsError}
+            </div>
+          )}
+          {activeTab === "pipeline" &&
+            (leadsLoading ? <LoadingPanel label="Loading pipeline…" /> : <PipelineBoard leads={leads} />)}
+          {activeTab === "leads" &&
+            (leadsLoading ? <LoadingPanel label="Loading leads…" /> : <LeadsTable leads={leads} />)}
         </div>
       </main>
     </div>

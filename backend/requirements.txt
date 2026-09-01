@@ -2,16 +2,21 @@
 fastapi==0.111.0
 uvicorn[standard]==0.30.0
 pydantic==2.7.0
+pydantic-settings==2.3.4
+email-validator==2.2.0
 python-dotenv==1.0.1
 
 # Database
-supabase==2.5.0
+supabase==2.30.0
 asyncpg==0.29.0
 
 # AI / LLM
 langchain==0.2.0
-langchain-groq==0.1.0
+langchain-core==0.2.0
+# 0.1.0 requires langchain-core <0.2 and conflicts with the 0.2 stack below.
+langchain-groq==0.1.5
 groq==0.9.0
+huggingface-hub==0.34.4
 langgraph==0.0.59
 
 # Scraping
@@ -24,11 +29,12 @@ pandas==2.2.0
 numpy==1.26.0
 
 # Voice / Audio
-piper-tts==1.2.0
+# piper-tts (subprocess binary, not pip-installable). Used when installed locally.
+gTTS==2.5.1
 webrtcvad==2.0.10
 
 # WebSocket / Real-time
-websockets==12.0
+websockets==15.0.1
 python-socketio==5.11.0
 
 # HTTP / API
@@ -38,10 +44,16 @@ requests==2.31.0
 
 # Utilities
 python-multipart==0.0.9
+
+# Background jobs. Celery runs scheduled property ingestion and the reminders
+# engine (app/worker.py); docker-compose declares the worker and beat services
+# that execute them.
 celery==5.4.0
-redis==5.0.0
-apscheduler==3.10.0
+redis==5.0.7
+
+# Billing
+stripe==10.4.0
 
 # Testing
 pytest==8.2.0
-pytest-asyncio==0.23.0
+pytest-asyncio==0.23.8

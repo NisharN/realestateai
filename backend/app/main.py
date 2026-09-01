@@ -8,7 +8,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.api import leads, properties, conversations, webhooks, voice
+from app.api import (
+    auth,
+    billing,
+    conversations,
+    dashboard,
+    ingestion,
+    leads,
+    market,
+    members,
+    properties,
+    voice,
+    webhooks,
+    workflows,
+    workspace,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -38,7 +52,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=get_settings().cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,7 +65,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "error": str(exc)}
+        content={"detail": {"code": "internal_error", "message": "Internal server error"}}
     )
 
 
@@ -68,21 +82,47 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check."""
+    """Dependency configuration health without exposing credentials.
+
+    Also reports the effective data mode per source, so it's always obvious
+    whether a deployment is serving seeded demo data or talking to a real
+    service. ``configured`` vs ``mock`` here is the difference between a live
+    customer instance and a demo.
+    """
+    settings = get_settings()
     return {
         "status": "healthy",
-        "database": "connected",
-        "llm": "groq",
-        "scrapers": ["bayut", "propertyfinder", "dubizzle"]
+        "workspace": settings.WORKSPACE_NAME,
+        "tenancy": "single-tenant",
+        "database": "configured" if settings.SUPABASE_URL else "mock",
+        "redis": "configured" if settings.REDIS_URL else "missing",
+        "llm": "configured" if settings.GROQ_API_KEY else "fallback",
+        "billing": "configured" if settings.STRIPE_SECRET_KEY else "disabled",
+        "data_modes": {
+            "properties": settings.properties_mode,
+            "whatsapp": settings.whatsapp_mode,
+            "dld": settings.DATA_MODE_DLD,
+        },
+        "voice_outbound": (
+            "enabled" if settings.VOICE_OUTBOUND_ENABLED else "disabled"
+        ),
     }
 
 
 # Include routers
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(members.router, prefix="/api/v1/members", tags=["Members"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(leads.router, prefix="/api/v1/leads", tags=["Leads"])
 app.include_router(properties.router, prefix="/api/v1/properties", tags=["Properties"])
 app.include_router(conversations.router, prefix="/api/v1/conversations", tags=["Conversations"])
 app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 app.include_router(voice.router, prefix="/api/v1/voice", tags=["Voice"])
+app.include_router(workspace.router, prefix="/api/v1/workspace", tags=["Workspace"])
+app.include_router(ingestion.router, prefix="/api/v1/ingestion", tags=["Ingestion"])
+app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
+app.include_router(market.router, prefix="/api/v1/market", tags=["Market"])
+app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])
 
 
 if __name__ == "__main__":
