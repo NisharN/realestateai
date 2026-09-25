@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import {
   BookOpen,
   Building2,
+  Cable,
+  Link2,
+  Sparkles,
   ClipboardList,
   KanbanSquare,
   LayoutDashboard,
@@ -26,7 +29,10 @@ const ICONS = {
   dashboard: LayoutDashboard,
   broker: ClipboardList,
   pipeline: KanbanSquare,
-  cowork: Workflow,
+  connections: Cable,
+  crm: Link2,
+  routines: Workflow,
+  insights: Sparkles,
   properties: Building2,
   market: MapIcon,
   automations: Zap,
@@ -46,7 +52,7 @@ function isActive(pathname: string, item: NavigationItem) {
 function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; pathname: string; onNavigate?: () => void }) {
   const groups = [
     { label: "Workspace", keys: ["/dashboard", "/broker", "/broker/pipeline", "/properties", "/market"] },
-    { label: "Operations", keys: ["/cowork", "/automations"] },
+    { label: "Operations", keys: ["/cowork/connections", "/cowork/crm", "/cowork/routines", "/cowork/insights"] },
     { label: "Settings", keys: ["/configure", "/members", "/docs"] },
   ];
   return (

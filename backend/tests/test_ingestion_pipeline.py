@@ -22,19 +22,28 @@ from app.modules.ingestion.connectors.csv_upload import parse_csv
 from app.modules.ingestion.connectors.webhook import SignatureError, WebhookConnector
 from app.modules.ingestion.field_maps import suggest_field_map
 from app.modules.ingestion.models import CanonicalLead, RawRecord
-from app.modules.ingestion.pipeline.processor import process_many, process_record, retry_errors
-from app.modules.ingestion.pipeline.stages import clean_phone, clean_record, map_record, validate_record
+from app.modules.ingestion.pipeline.processor import (
+    process_many,
+    process_record,
+    retry_errors,
+)
+from app.modules.ingestion.pipeline.stages import (
+    clean_phone,
+    clean_record,
+    map_record,
+    validate_record,
+)
 from app.modules.store import reset_memory, table
 
 client = TestClient(app, raise_server_exceptions=False)
 WS = get_settings().WORKSPACE_ID
 
 CSV = (
-    "Full Name,Mobile,Email,Budget,Area,Type,Beds,Purpose\n"
-    "Ahmed Ali,050 123 4567,ahmed@example.com,1.2m,Dubai Marina,Apartment,2,buy\n"
-    "Sara Khan,+971 55 765 4321,sara@example.com,AED 120k per year,JVC,apartment,1,rent\n"
-    "No Contact,,,,Downtown,villa,,buy\n"
-).encode()
+    b"Full Name,Mobile,Email,Budget,Area,Type,Beds,Purpose\n"
+    b"Ahmed Ali,050 123 4567,ahmed@example.com,1.2m,Dubai Marina,Apartment,2,buy\n"
+    b"Sara Khan,+971 55 765 4321,sara@example.com,AED 120k per year,JVC,apartment,1,rent\n"
+    b"No Contact,,,,Downtown,villa,,buy\n"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -166,7 +175,8 @@ async def test_same_person_from_two_sources_merges_into_one_lead_with_two_source
     sources = await table("lead_sources", WS).select(lead_id=lead["id"])
     assert len(sources) == 2
     types = [e["type"] for e in await table("lead_events", WS).select(lead_id=lead["id"])]
-    assert types == ["lead.created", "lead.updated"]
+    assert [t for t in types if t != "lead.scored"] == ["lead.created", "lead.updated"]
+    assert "lead.scored" in types  # every pull re-scores
     changes = await table("lead_change_log", WS).select(lead_id=lead["id"])
     assert any(c["field"] == "budget_max_aed" for c in changes)
 
@@ -220,9 +230,10 @@ async def test_outbox_consumer_is_idempotent():
     async def handler(event):
         seen.append(event["id"])
 
-    assert await events.consume(WS, "test", handler) == 2
+    first = await events.consume(WS, "test", handler)
+    assert first >= 2  # lead.created/updated plus lead.scored per pull
     assert await events.consume(WS, "test", handler) == 0
-    assert len(seen) == 2
+    assert len(seen) == first
 
 
 # -- connectors ------------------------------------------------------------

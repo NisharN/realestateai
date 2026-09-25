@@ -177,8 +177,9 @@ async def _run(
         state.misunderstandings += 1
     else:
         state.misunderstandings = 0
-    state.score, state.score_reasons = scorer.score(state)
-    state.band = scorer.band_for(state.score)  # type: ignore[assignment]
+    qual = await scorer.qualify(state, recent_messages=[text], fallbacks=fallbacks)
+    state.score, state.score_reasons = qual.score, qual.reasons
+    state.band = qual.band  # type: ignore[assignment]
 
     # 3. decide -----------------------------------------------------------
     decision = policy.decide(state, facts)

@@ -88,6 +88,12 @@ async def _automations(workspace_id: str) -> dict[str, Any]:
     return await run_automations(workspace_id)
 
 
+async def _routines(workspace_id: str) -> dict[str, Any]:
+    from app.modules.cowork.routines import run_due
+
+    return await run_due(workspace_id)
+
+
 async def _retention(workspace_id: str) -> dict[str, Any]:
     from app.modules.privacy.service import retention_purge
 
@@ -102,6 +108,7 @@ JOBS: tuple[JobSpec, ...] = (
     JobSpec("reassign_stale_handoffs", "Reassign stale handoffs", "Route handoffs no broker accepted in time to the next available broker.", "engagement", 60, _reassign),
     JobSpec("crm_writeback", "CRM write-back", "Push score/stage/assignment changes back to the originating CRM (idempotent outbox).", "sync", 60, _writeback),
     JobSpec("retention_purge", "PDPL retention purge", "Erase or anonymise lead data past its retention period.", "compliance", 86_400, _retention),
+    JobSpec("run_routines", "Run due routines", "Execute every enabled routine whose schedule is due (connector, data and LLM steps).", "engagement", 60, _routines),
 )
 JOB_INDEX: dict[str, JobSpec] = {j.id: j for j in JOBS}
 
