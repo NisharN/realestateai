@@ -49,3 +49,7 @@ backend/models/piper/
 *.tmp
 *.bak
 *.swp
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/

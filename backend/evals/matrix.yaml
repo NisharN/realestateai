@@ -1,0 +1,252 @@
+# Parameterised eval cases (expanded by scripts/run_evals.py). Each matrix
+# entry is a phrasing template × a list of scenarios; every scenario becomes one
+# case with id "<matrix id>__<scenario id>". Templates use {area}, {type},
+# {beds}, {budget}. Expectations use the same keys as cases.yaml; `move_in`
+# accepts any listed move (a suggest turn may legitimately return suggest_empty
+# when the seed inventory has no match for that community/type). A template's
+# `requires` maps scenario keys to required values (e.g. inventory: true).
+scenarios:
+  - id: marina_apt_buy
+    inventory: true
+    area: "Dubai Marina"
+    area_ar: "مرسى دبي"
+    area_alias: "marina"
+    type: apartment
+    type_ar: "شقة"
+    beds: 2
+    purpose: buy
+    budget: "2.5 million"
+    budget_ar: "2.5 مليون"
+    budget_aed: 2500000
+  - id: downtown_apt_buy
+    inventory: true
+    area: "Downtown Dubai"
+    area_ar: "وسط مدينة دبي"
+    area_alias: "downtown"
+    type: apartment
+    type_ar: "شقة"
+    beds: 1
+    purpose: buy
+    budget: "1.8m"
+    budget_ar: "1.8 مليون"
+    budget_aed: 1800000
+  - id: ranches_villa_buy
+    inventory: true
+    area: "Arabian Ranches"
+    area_ar: "المرابع العربية"
+    area_alias: "ranches"
+    type: villa
+    type_ar: "فيلا"
+    beds: 4
+    purpose: buy
+    budget: "5 million"
+    budget_ar: "5 مليون"
+    budget_aed: 5000000
+  - id: palm_villa_buy
+    inventory: true
+    area: "Palm Jumeirah"
+    area_ar: "نخلة جميرا"
+    area_alias: "the palm"
+    type: villa
+    type_ar: "فيلا"
+    beds: 5
+    purpose: buy
+    budget: "15 million"
+    budget_ar: "15 مليون"
+    budget_aed: 15000000
+  - id: bay_apt_buy
+    inventory: false
+    area: "Business Bay"
+    area_ar: "الخليج التجاري"
+    area_alias: "business bay"
+    type: apartment
+    type_ar: "شقة"
+    beds: 1
+    purpose: buy
+    budget: "1.2 million"
+    budget_ar: "1.2 مليون"
+    budget_aed: 1200000
+  - id: difc_apt_buy
+    inventory: true
+    area: "DIFC"
+    area_ar: "مركز دبي المالي العالمي"
+    area_alias: "difc"
+    type: apartment
+    type_ar: "شقة"
+    beds: 2
+    purpose: buy
+    budget: "3m"
+    budget_ar: "3 مليون"
+    budget_aed: 3000000
+  - id: hills_apt_buy
+    inventory: false
+    area: "Dubai Hills Estate"
+    area_ar: "دبي هيلز"
+    area_alias: "dubai hills"
+    type: apartment
+    type_ar: "شقة"
+    beds: 3
+    purpose: buy
+    budget: "4 million"
+    budget_ar: "4 مليون"
+    budget_aed: 4000000
+  - id: jvc_apt_buy
+    inventory: false
+    area: "Jumeirah Village Circle"
+    area_ar: "قرية جميرا الدائرية"
+    area_alias: "jvc"
+    type: apartment
+    type_ar: "شقة"
+    beds: 1
+    purpose: buy
+    budget: "900k"
+    budget_ar: "900 ألف"
+    budget_aed: 900000
+  - id: damac_townhouse_buy
+    inventory: false
+    area: "DAMAC Hills"
+    area_ar: "داماك هيلز"
+    area_alias: "damac hills"
+    type: townhouse
+    type_ar: "تاون هاوس"
+    beds: 3
+    purpose: buy
+    budget: "2.8 million"
+    budget_ar: "2.8 مليون"
+    budget_aed: 2800000
+  - id: jbr_apt_buy
+    inventory: false
+    area: "Jumeirah Beach Residence"
+    area_ar: "جميرا بيتش ريزيدنس"
+    area_alias: "jbr"
+    type: apartment
+    type_ar: "شقة"
+    beds: 2
+    purpose: buy
+    budget: "2.2m"
+    budget_ar: "2.2 مليون"
+    budget_aed: 2200000
+
+matrix:
+  # --------------------------------------------------------------- English
+  - id: en_one_shot
+    turns:
+      - say: "I want to {purpose} a {beds} bed {type} in {area}"
+        move: ask_next_field
+        language: en
+        slots: {purpose: "{purpose}", area: ["{area}"]}
+      - say: "around {budget}"
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}
+  - id: en_alias_area
+    turns:
+      - say: "looking to {purpose} a {type} in {area_alias}, {beds} bedrooms"
+        move: ask_next_field
+        slots: {purpose: "{purpose}", area: ["{area}"]}
+      - say: "budget {budget}"
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}
+  - id: en_budget_first_clarifies_period
+    # A bare amount with no purpose yet: never assume sale vs yearly rent.
+    turns:
+      - say: "my budget is {budget}"
+        move: clarify_budget
+        reply_contains: ["per year"]
+      - say: "to {purpose}, a {beds} bed {type} in {area}"
+        move_in: [suggest, suggest_empty]
+        slots: {purpose: "{purpose}", area: ["{area}"], "budget.max_aed": "{budget_aed}"}
+  - id: en_greeting_then_qualify
+    turns:
+      - say: "hello"
+        move: greeting
+      - say: "{purpose} {type} {area} {beds}br"
+        move: ask_next_field
+        slots: {area: ["{area}"]}
+      - say: "{budget}"
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}
+  - id: en_stop_after_qualify
+    turns:
+      - say: "{purpose} a {beds} bed {type} in {area}, {budget}"
+      - say: "stop"
+        move: opt_out
+        ended: true
+  - id: en_human_after_qualify
+    turns:
+      - say: "{purpose} a {beds} bed {type} in {area}, {budget}"
+      - say: "can I speak to a human agent please"
+        move: handoff_now
+        handoff: true
+      - say: "hello?"
+        move: after_handoff
+  - id: en_full_handoff
+    requires: {inventory: true}
+    turns:
+      - say: "{purpose} {beds} bed {type} {area}"
+      - say: "budget {budget}"
+        move_in: [suggest, suggest_empty]
+      - say: "within 3 months, cash"
+        move: confirm_handoff
+      - say: "yes"
+        move: handoff
+        handoff: true
+  - id: en_no_inventory_twice_offers_specialist
+    requires: {inventory: false}
+    turns:
+      - say: "{purpose} {beds} bed {type} {area}"
+      - say: "budget {budget}"
+        move: suggest
+        cards_max: 0
+      - say: "within 3 months, cash"
+        move: suggest
+        cards_max: 0
+      - say: "anything else?"
+        move: confirm_handoff
+        reply_excludes: ["great choice"]
+        reply_contains: ["off-market"]
+  - id: en_no_guarantee_words
+    turns:
+      - say: "{purpose} a {beds} bed {type} in {area} for {budget}"
+        reply_excludes: ["guaranteed", "guarantee", "risk-free"]
+  # ---------------------------------------------------------------- Arabic
+  - id: ar_one_shot
+    turns:
+      - say: "أريد شراء {type_ar} {beds} غرف في {area_ar}"
+        language: ar
+        move: ask_next_field
+        slots: {purpose: buy, area: ["{area}"]}
+      - say: "الميزانية {budget_ar}"
+        language: ar
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}
+  - id: ar_stop
+    turns:
+      - say: "أبحث عن {type_ar} في {area_ar} للشراء"
+        language: ar
+      - say: "توقف"
+        move: opt_out
+        ended: true
+  - id: ar_human
+    turns:
+      - say: "أبحث عن {type_ar} في {area_ar} للشراء"
+        language: ar
+      - say: "أريد التحدث مع موظف"
+        move: handoff_now
+        handoff: true
+  # ----------------------------------------------------------------- Mixed
+  - id: mixed_arabic_area_english_rest
+    turns:
+      - say: "{purpose} {beds} bed {type} in {area_ar}"
+        move: ask_next_field
+        slots: {purpose: "{purpose}", area: ["{area}"]}
+      - say: "{budget_ar}"
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}
+  - id: mixed_arabic_purpose_english_area
+    turns:
+      - say: "أريد شراء {type} in {area_alias}"
+        move: ask_next_field
+        slots: {purpose: buy, area: ["{area}"]}
+      - say: "budget {budget}"
+        move_in: [suggest, suggest_empty]
+        slots: {"budget.max_aed": "{budget_aed}"}

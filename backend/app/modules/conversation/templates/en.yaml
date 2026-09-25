@@ -41,6 +41,8 @@ suggest_empty:
   - "I don't have a live listing that matches all of that right now. Would you consider a nearby community or a slightly higher budget? Otherwise a specialist can check off-market options for you."
 confirm_handoff:
   - "Great choice. Shall I have a specialist call you to arrange a viewing? {slot_suggestion}"
+confirm_handoff_no_inventory:
+  - "Nothing live matches that brief yet, but a specialist can check off-market and upcoming options for you. Shall I have one call you? {slot_suggestion}"
 handoff:
   - "Perfect — {broker_name} will call you {slot_text}. You'll receive a WhatsApp confirmation shortly. Thank you!"
   - "Perfect — a specialist will be in touch shortly to arrange the viewing. Thank you!"
