@@ -45,6 +45,20 @@ interface Message {
   timestamp: Date;
 }
 
+interface PropertyCardDto {
+  property_id: string;
+  title: string;
+  price: number | null;
+  area: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  size_sqft: number | null;
+  image: string | null;
+  lat: number | null;
+  lng: number | null;
+  match_reasons: string[];
+}
+
 interface Property {
   id: string;
   title: string;
@@ -532,22 +546,21 @@ export default function ChatPage() {
     const data = result.data as {
       response: string;
       needs_human: boolean;
-      matched_properties: Property[];
+      matched_properties: PropertyCardDto[];
     };
 
-    const properties: Property[] = (data.matched_properties || []).map((p: any) => ({
-      id: String(p.id ?? p.property_id ?? Math.random().toString(36).slice(2)),
-      title: `Property ${p.property_id ?? p.id}`,
-      area: "Dubai",
-      price: 0,
-      bedrooms: 0,
-      bathrooms: 0,
-      size_sqft: 0,
-      images: ["https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"],
-      map_lat: 25.2,
-      map_lng: 55.27,
-      amenities: [],
-      match_score: (p as { match_score?: number }).match_score,
+    const properties: Property[] = (data.matched_properties || []).map((p) => ({
+      id: String(p.property_id),
+      title: p.title,
+      area: p.area ?? "Dubai",
+      price: p.price ?? 0,
+      bedrooms: p.bedrooms ?? 0,
+      bathrooms: p.bathrooms ?? 0,
+      size_sqft: p.size_sqft ?? 0,
+      images: p.image ? [p.image] : [],
+      map_lat: p.lat ?? 25.2,
+      map_lng: p.lng ?? 55.27,
+      amenities: p.match_reasons ?? [],
     }));
 
     if (properties.length) setMapProperties(properties);

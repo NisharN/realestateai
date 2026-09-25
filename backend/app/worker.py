@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from celery import Celery
@@ -129,17 +129,17 @@ def run_ingestion_schedule(self, workspace_id: str, schedule_id: str) -> Dict[st
     try:
         service = PropertyIngestionService(get_property_repository(workspace_id))
         result = _run_async(_execute_source(service, source, schedule))
-        _record_job_run(client, workspace_id, schedule_id, "succeeded", started_at, result)
+        _record_job_run(client, workspace_id, schedule_id, "succeeded", started_at, result, self.request.id)
         _advance_schedule(client, workspace_id, schedule_id, schedule)
         return {"status": "succeeded", "source": source, **result}
 
     except Exception as exc:
         logger.error("Ingestion schedule %s failed: %s", schedule_id, exc)
         _record_job_run(
-            client, workspace_id, schedule_id, "failed", started_at, {"error": str(exc)}
+            client, workspace_id, schedule_id, "failed", started_at, {"error": str(exc)}, self.request.id
         )
         transition = failure_transition(
-            failure_count=int(schedule.get("failure_count") or 0),
+            consecutive_failures=int(schedule.get("consecutive_failures") or 0),
             error_code=type(exc).__name__,
             now=datetime.now(timezone.utc),
         )
@@ -183,17 +183,6 @@ async def _execute_source(service: Any, source: str, schedule: Dict[str, Any]) -
         )
         return await service.import_records(source=source, records=records, dedupe=True)
 
-    if source in {"propertyfinder", "bayut", "dubizzle"}:
-        if source in {"bayut", "dubizzle"} and not get_settings().ENABLE_BAYUT_DUBIZZLE_SCRAPING:
-            return {"source": source, "received": 0, "saved": 0, "skipped": 0,
-                    "errors": ["source disabled by ENABLE_BAYUT_DUBIZZLE_SCRAPING"]}
-        return await service.scrape_source(
-            source=source,
-            property_type=config.get("property_type", "buy_apartment"),
-            area=config.get("area"),
-            pages=int(config.get("pages", 1)),
-        )
-
     raise ValueError(f"Unsupported ingestion source: {source}")
 
 
@@ -204,39 +193,58 @@ def _record_job_run(
     status: str,
     started_at: datetime,
     result: Dict[str, Any],
+    task_id: str | None = None,
 ) -> None:
     try:
         client.table("job_runs").insert(
-            {
-                "workspace_id": workspace_id,
-                "schedule_id": schedule_id,
-                "status": status,
-                "started_at": started_at.isoformat(),
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "result": result,
-            }
+            job_run_row(workspace_id, schedule_id, status, started_at, result, task_id)
         ).execute()
-    except Exception as exc:  # pragma: no cover - telemetry must not break the job
-        logger.debug("Could not record job run: %s", exc)
+    except Exception as exc:
+        logger.warning("Could not record job run for schedule %s: %s", schedule_id, exc)
+
+
+def job_run_row(
+    workspace_id: str,
+    schedule_id: str,
+    status: str,
+    started_at: datetime,
+    result: Dict[str, Any],
+    task_id: str | None = None,
+) -> Dict[str, Any]:
+    """Row for ``job_runs`` matching the migration (idempotency_key + summary)."""
+    return {
+        "workspace_id": workspace_id,
+        "schedule_id": schedule_id,
+        "idempotency_key": task_id or f"{schedule_id}:{started_at.isoformat()}",
+        "status": status,
+        "attempts": 1,
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "error_code": result.get("error") if status == "failed" else None,
+        "summary": result,
+    }
 
 
 def _advance_schedule(
     client: Any, workspace_id: str, schedule_id: str, schedule: Dict[str, Any]
 ) -> None:
     """Reset failure state and set the next run time."""
-    from datetime import timedelta
-
-    interval_minutes = int(schedule.get("interval_minutes") or 60)
     now = datetime.now(timezone.utc)
     client.table("ingestion_schedules").update(
-        {
-            "failure_count": 0,
-            "last_error_code": None,
-            "last_run_at": now.isoformat(),
-            "next_run_at": (now + timedelta(minutes=interval_minutes)).isoformat(),
-            "updated_at": now.isoformat(),
-        }
+        advance_schedule_row(schedule, now)
     ).eq("workspace_id", workspace_id).eq("id", schedule_id).execute()
+
+
+def advance_schedule_row(schedule: Dict[str, Any], now: datetime) -> Dict[str, Any]:
+    config = schedule.get("config") or {}
+    interval_minutes = int(config.get("interval_minutes") or 60)
+    return {
+        "consecutive_failures": 0,
+        "last_error_code": None,
+        "last_success_at": now.isoformat(),
+        "next_run_at": (now + timedelta(minutes=interval_minutes)).isoformat(),
+        "updated_at": now.isoformat(),
+    }
 
 
 # --------------------------------------------------------------------------

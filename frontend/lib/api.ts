@@ -184,12 +184,6 @@ export const propertiesApi = {
     return fetchApi(`/api/v1/properties/search?${query.toString()}`);
   },
 
-  scrapeBayut: (params?: { property_type?: string; area?: string; pages?: number }) =>
-    fetchApi("/api/v1/properties/scrape/bayut", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
-
   getById: (id: string) => fetchApi(`/api/v1/properties/${id}`),
 };
 

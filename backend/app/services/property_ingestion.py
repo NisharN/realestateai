@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 from app.models.property import PropertyImportRecord
-from app.scrapers import scrape_bayut, scrape_dubizzle, scrape_propertyfinder
 
 logger = logging.getLogger(__name__)
 
@@ -73,77 +72,6 @@ class PropertyIngestionService:
         text = data.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(text))
         return await self.import_records(source, list(reader), dedupe=dedupe)
-
-    async def import_manual_urls(
-        self,
-        urls: List[str],
-        fetch_details: bool = True,
-        dedupe: bool = True,
-    ) -> Dict[str, Any]:
-        grouped: Dict[str, List[str]] = {"bayut": [], "dubizzle": [], "propertyfinder": []}
-        unsupported: List[str] = []
-
-        for url in urls:
-            source = self._detect_source_from_url(url)
-            if source in grouped:
-                grouped[source].append(url)
-            else:
-                unsupported.append(url)
-
-        saved = 0
-        skipped = len(unsupported)
-        errors = [f"unsupported url: {url}" for url in unsupported]
-        received = len(urls)
-
-        for source, source_urls in grouped.items():
-            if not source_urls:
-                continue
-            scraper_cls = {
-                "bayut": self._scrape_detail_bayut,
-                "dubizzle": self._scrape_detail_dubizzle,
-                "propertyfinder": self._scrape_detail_propertyfinder,
-            }[source]
-            records: List[Dict[str, Any]] = []
-            for url in source_urls:
-                try:
-                    detail = await scraper_cls(url) if fetch_details else {"url": url}
-                    detail["url"] = url
-                    detail["id"] = self._source_id_from_url(url)
-                    detail["source_url"] = url
-                    records.append(detail)
-                except Exception as exc:
-                    errors.append(f"{source} detail failed for {url}: {exc}")
-
-            result = await self.import_records(source, records, dedupe=dedupe)
-            saved += result["saved"]
-            skipped += result["skipped"]
-            errors.extend(result["errors"])
-
-        return {
-            "source": "manual_url_import",
-            "received": received,
-            "saved": saved,
-            "skipped": skipped,
-            "errors": errors,
-        }
-
-    async def scrape_source(
-        self,
-        source: str,
-        property_type: str = "buy_apartment",
-        area: Optional[str] = None,
-        pages: int = 1,
-        dedupe: bool = True,
-    ) -> Dict[str, Any]:
-        scrapers = {
-            "propertyfinder": scrape_propertyfinder,
-            "bayut": scrape_bayut,
-            "dubizzle": scrape_dubizzle,
-        }
-        if source not in scrapers:
-            raise ValueError(f"Unsupported scrape source: {source}")
-        listings = await scrapers[source](property_type=property_type, area=area, pages=pages)
-        return await self.import_records(source, listings, dedupe=dedupe)
 
     def _normalize_record(self, source: str, raw: Dict[str, Any]) -> PropertyImportRecord:
         images = self._listify(raw.get("images") or raw.get("image_urls") or raw.get("photos"))
@@ -212,36 +140,8 @@ class PropertyIngestionService:
             return None
         return str(value)
 
-    def _detect_source_from_url(self, url: str) -> Optional[str]:
-        host = urlparse(url).netloc.lower()
-        if "propertyfinder" in host:
-            return "propertyfinder"
-        if "bayut" in host:
-            return "bayut"
-        if "dubizzle" in host:
-            return "dubizzle"
-        return None
-
     def _source_id_from_url(self, url: Optional[str]) -> Optional[str]:
         if not url:
             return None
         path = urlparse(url).path.rstrip("/")
         return path.split("/")[-1] if path else None
-
-    async def _scrape_detail_bayut(self, url: str) -> Dict[str, Any]:
-        from app.scrapers.bayut_scraper import BayutScraper
-
-        async with BayutScraper() as scraper:
-            return await scraper.scrape_detail(url)
-
-    async def _scrape_detail_dubizzle(self, url: str) -> Dict[str, Any]:
-        from app.scrapers.dubizzle_scraper import DubizzleScraper
-
-        async with DubizzleScraper() as scraper:
-            return await scraper.scrape_detail(url)
-
-    async def _scrape_detail_propertyfinder(self, url: str) -> Dict[str, Any]:
-        from app.scrapers.propertyfinder_scraper import PropertyFinderScraper
-
-        async with PropertyFinderScraper() as scraper:
-            return await scraper.scrape_detail(url)

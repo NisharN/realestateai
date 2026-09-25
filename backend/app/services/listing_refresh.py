@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
-from app.config import get_settings
+from app.modules.llm import LLMUnavailable, get_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -198,29 +198,18 @@ async def polish_with_llm(copy: RefreshedCopy) -> RefreshedCopy:
     output stands on its own — the feature must not silently stop working just
     because an LLM is unavailable.
     """
-    settings = get_settings()
-    if not settings.GROQ_API_KEY:
-        return copy
-
+    prompt = (
+        "Rewrite this Dubai property listing description so it reads naturally "
+        "and does not duplicate the original phrasing. Keep every fact "
+        "unchanged, keep it under 80 words, no emojis, no invented features.\n\n"
+        f"{copy.description}"
+    )
     try:
-        from langchain_groq import ChatGroq
-
-        llm = ChatGroq(
-            api_key=settings.GROQ_API_KEY,
-            model=settings.GROQ_MODEL_FAST,
-            temperature=0.7,
+        completion = await get_gateway().complete_text(
+            [{"role": "user", "content": prompt}], tier="fast", deadline_s=4.0, temperature=0.7
         )
-        prompt = (
-            "Rewrite this Dubai property listing description so it reads naturally "
-            "and does not duplicate the original phrasing. Keep every fact "
-            "unchanged, keep it under 80 words, no emojis, no invented features.\n\n"
-            f"{copy.description}"
-        )
-        response = await llm.ainvoke(prompt)
-        text = getattr(response, "content", "") or ""
-        if text.strip():
-            copy.description = text.strip()
-    except Exception as exc:
+        if completion.text.strip():
+            copy.description = completion.text.strip()
+    except LLMUnavailable as exc:
         logger.warning("Listing copy polish skipped: %s", exc)
-
     return copy

@@ -11,14 +11,14 @@ def test_repeated_failure_disables_schedule_and_preserves_diagnostics():
     now = datetime(2026, 8, 13, tzinfo=timezone.utc)
 
     transition = failure_transition(
-        failure_count=4,
+        consecutive_failures=4,
         error_code="provider_timeout",
         now=now,
         disable_after=5,
     )
 
     assert transition == {
-        "failure_count": 5,
+        "consecutive_failures": 5,
         "enabled": False,
         "last_error_code": "provider_timeout",
         "next_run_at": None,
@@ -31,5 +31,5 @@ def test_failure_before_threshold_schedules_retry():
     transition = failure_transition(1, "bad_feed", now, disable_after=5)
 
     assert transition["enabled"] is True
-    assert transition["failure_count"] == 2
+    assert transition["consecutive_failures"] == 2
     assert transition["next_run_at"] == (now + timedelta(seconds=120)).isoformat()
