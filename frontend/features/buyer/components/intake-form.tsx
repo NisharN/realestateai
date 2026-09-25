@@ -1,12 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { UserRound } from "lucide-react";
 import type { Strings } from "../i18n";
 import type { IntakeForm } from "../types";
 
-const inputClass =
-  "px-3 py-2 text-sm border border-brand/30 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-ring/30";
+const inputClass = "ui-input text-sm";
 
 export function IntakeFormPanel({
   t,
@@ -26,7 +25,7 @@ export function IntakeFormPanel({
       initial={{ height: 0, opacity: 0 }}
       animate={{ height: "auto", opacity: 1 }}
       exit={{ height: 0, opacity: 0 }}
-      className="bg-brand/5 border-b border-brand/10 px-6 py-4 overflow-hidden"
+      className="border-b border-border bg-surface px-6 py-3 overflow-hidden"
     >
       <form
         onSubmit={(e) => {
@@ -36,8 +35,8 @@ export function IntakeFormPanel({
         className="max-w-4xl"
         aria-label={t.intakeTitle}
       >
-        <div className="text-xs font-semibold text-brand uppercase tracking-wider mb-2 flex items-center gap-2">
-          <Sparkles className="w-3 h-3" /> {t.intakeTitle}
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <UserRound className="h-3.5 w-3.5" /> {t.intakeTitle}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <input
@@ -77,8 +76,8 @@ export function IntakeFormPanel({
           />
         </div>
         <div className="flex items-center justify-between mt-2 gap-2">
-          <p className="text-xs text-brand">{t.intakeSkipHint}</p>
-          <button type="button" onClick={onSkip} className="text-xs text-brand hover:underline">
+          <p className="text-xs text-muted-foreground">{t.intakeSkipHint}</p>
+          <button type="button" onClick={onSkip} className="text-xs text-foreground underline-offset-2 hover:underline">
             {t.skip}
           </button>
         </div>

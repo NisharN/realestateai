@@ -50,14 +50,14 @@ function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; 
     { label: "Settings", keys: ["/configure", "/members", "/docs"] },
   ];
   return (
-    <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6" aria-label="Primary">
+    <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Primary">
       {groups.map((g) => {
         const entries = items.filter((i) => g.keys.includes(i.href));
         if (entries.length === 0) return null;
         return (
           <div key={g.label}>
-            <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">{g.label}</p>
-            <ul className="space-y-0.5">
+            <p className="px-2.5 mb-1 text-[11px] font-medium text-muted-foreground/80">{g.label}</p>
+            <ul className="space-y-px">
               {entries.map((item) => {
                 const Icon = ICONS[item.icon];
                 const active = isActive(pathname, item);
@@ -68,11 +68,13 @@ function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; 
                       onClick={onNavigate}
                       aria-current={active ? "page" : undefined}
                       className={
-                        "group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition " +
-                        (active ? "bg-white/10 text-white shadow-inner" : "text-white/65 hover:bg-white/5 hover:text-white")
+                        "group flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors " +
+                        (active
+                          ? "bg-ink/[0.06] font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-ink/[0.04] hover:text-foreground")
                       }
                     >
-                      <Icon className={"h-4 w-4 " + (active ? "text-gold" : "text-white/50 group-hover:text-white/80")} />
+                      <Icon className={"h-4 w-4 " + (active ? "text-brand" : "text-muted-foreground/70 group-hover:text-foreground")} />
                       {item.label}
                     </Link>
                   </li>
@@ -88,15 +90,40 @@ function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; 
 
 function Brand() {
   return (
-    <Link href="/dashboard" className="flex items-center gap-3 px-5 h-16 border-b border-white/10">
-      <div className="h-9 w-9 rounded-xl bg-gold/90 flex items-center justify-center shadow-pop">
-        <Building2 className="h-[18px] w-[18px] text-ink" />
+    <Link href="/dashboard" className="flex items-center gap-2.5 px-4 h-14">
+      <div className="h-7 w-7 rounded-md bg-ink flex items-center justify-center">
+        <Building2 className="h-3.5 w-3.5 text-white" />
       </div>
       <div className="leading-tight">
-        <p className="text-sm font-semibold text-white tracking-tight">Dubai Real Estate AI</p>
-        <p className="text-[11px] text-white/45">Brokerage workspace</p>
+        <p className="text-[13px] font-semibold text-foreground tracking-tight">Dubai Real Estate AI</p>
+        <p className="text-[11px] text-muted-foreground">Brokerage workspace</p>
       </div>
     </Link>
+  );
+}
+
+function SidebarFooter({ session }: { session: SessionContext | null }) {
+  return (
+    <div className="border-t border-border p-3 space-y-2">
+      <Link
+        href="/"
+        className="flex items-center gap-2.5 rounded-md border border-border bg-card px-2.5 py-2 text-[13px] text-foreground hover:bg-muted transition-colors"
+      >
+        <MessageCircle className="h-4 w-4 text-brand" />
+        <span className="flex-1">Open buyer assistant</span>
+      </Link>
+      {session && (
+        <div className="flex items-center gap-2.5 px-1.5 pt-1">
+          <div className="h-7 w-7 rounded-full bg-gold-soft text-brand flex items-center justify-center text-xs font-semibold uppercase">
+            {session.role.slice(0, 1)}
+          </div>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate text-xs font-medium text-foreground">{session.broker_id ?? session.user_id.slice(0, 12)}</p>
+            <p className="text-[11px] capitalize text-muted-foreground">{session.role}</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -118,34 +145,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-canvas">
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-ink-gradient text-white sticky top-0 h-screen">
+      <aside className="hidden lg:flex w-60 shrink-0 flex-col border-e border-border bg-surface sticky top-0 h-screen">
         <Brand />
         <SidebarNav items={items} pathname={pathname} />
-        <div className="border-t border-white/10 p-4">
-          <Link href="/" className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2.5 text-sm text-white/80 hover:bg-white/10 transition">
-            <MessageCircle className="h-4 w-4 text-gold" />
-            <span className="flex-1">Buyer assistant</span>
-            <span className="text-[10px] uppercase tracking-wider text-white/40">Ali</span>
-          </Link>
-          {session && (
-            <div className="mt-3 flex items-center gap-3 px-1">
-              <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold uppercase">
-                {session.role.slice(0, 1)}
-              </div>
-              <div className="min-w-0 leading-tight">
-                <p className="truncate text-xs font-medium text-white/90">{session.broker_id ?? session.user_id.slice(0, 12)}</p>
-                <p className="text-[11px] capitalize text-white/45">{session.role}</p>
-              </div>
-            </div>
-          )}
-        </div>
+        <SidebarFooter session={session} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="lg:hidden sticky top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-card/90 backdrop-blur px-4">
+        <header className="lg:hidden sticky top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-canvas/90 backdrop-blur px-4">
           <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-sm">
-            <div className="h-7 w-7 rounded-lg bg-brand flex items-center justify-center">
-              <Building2 className="h-3.5 w-3.5 text-gold" />
+            <div className="h-7 w-7 rounded-md bg-ink flex items-center justify-center">
+              <Building2 className="h-3.5 w-3.5 text-white" />
             </div>
             Dubai Real Estate AI
           </Link>
@@ -155,11 +165,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         {open && (
           <div className="lg:hidden fixed inset-0 z-30 flex">
-            <div className="w-72 bg-ink-gradient text-white flex flex-col">
+            <div className="w-72 bg-surface border-e border-border flex flex-col">
               <Brand />
               <SidebarNav items={items} pathname={pathname} onNavigate={() => setOpen(false)} />
+              <SidebarFooter session={session} />
             </div>
-            <button type="button" aria-label="Close navigation" className="flex-1 bg-ink/40" onClick={() => setOpen(false)} />
+            <button type="button" aria-label="Close navigation" className="flex-1 bg-ink/30" onClick={() => setOpen(false)} />
           </div>
         )}
         <main className="flex-1 min-w-0">{children}</main>

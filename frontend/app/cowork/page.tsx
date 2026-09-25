@@ -9,8 +9,8 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, Cable, CalendarClock, Database, ListChecks, ScrollText, Workflow, Zap } from "lucide-react";
-import { Page, PageHeader, Skeleton, StatCard } from "@/components/ui/page";
+import { Activity, Cable, CalendarClock, Database, ListChecks, ScrollText, Zap } from "lucide-react";
+import { Page, PageHeader, Skeleton, StatCard, StatStrip } from "@/components/ui/page";
 import { coworkApi, type CoworkOverview } from "@/lib/api";
 import { relativeTime } from "@/lib/broker-format";
 import { ActivityTab, TasksTab } from "@/features/cowork/activity-tab";
@@ -57,24 +57,20 @@ function Cowork() {
     <Page>
       <PageHeader
         kicker="Operations"
-        title={
-          <span className="inline-flex items-center gap-2">
-            <Workflow className="h-6 w-6 text-gold" /> Co-work
-          </span>
-        }
+        title="Co-work"
         description="Integrations, schedules and task automations working alongside your team — with every run recorded."
       />
 
-      <div role="tablist" aria-label="Co-work sections" className="mt-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 text-sm font-medium shadow-card">
+      <div role="tablist" aria-label="Co-work sections" className="mt-5 flex gap-1 overflow-x-auto border-b border-border text-sm">
         {TABS.map(([key, label, Icon]) => (
           <button
             key={key}
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 ${tab === key ? "bg-brand text-white shadow-card" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+            className={`-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 transition-colors ${tab === key ? "border-ink font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
-            <Icon className="h-4 w-4" /> {label}
+            <Icon className="h-3.5 w-3.5" /> {label}
           </button>
         ))}
       </div>
@@ -127,38 +123,36 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab, sub?: IngestionTab
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <button type="button" className="text-start" onClick={() => onNavigate("integrations")}>
-          <StatCard label="Integrations" value={connected} hint={problems ? `${problems} need attention` : `${ov.integrations.not_configured ?? 0} not configured`} tone={problems ? "warning" : "success"} />
-        </button>
-        <button type="button" className="text-start" onClick={() => onNavigate("schedules")}>
-          <StatCard label="Scheduled jobs" value={`${ov.jobs.enabled}/${ov.jobs.total}`} hint={ov.jobs.failing ? `${ov.jobs.failing} failing` : "all healthy"} tone={ov.jobs.failing ? "danger" : "brand"} />
-        </button>
-        <button type="button" className="text-start" onClick={() => onNavigate("activity")}>
-          <StatCard
-            label={`Runs · last ${ov.runs.window_hours}h`}
-            value={ov.runs.runs}
-            hint={rate == null ? "no runs yet" : `${Math.round(rate * 100)}% success · ${ov.runs.failed} failed`}
-            tone={ov.runs.failed ? "warning" : "default"}
-          />
-        </button>
-        <button type="button" className="text-start" onClick={() => onNavigate("automations")}>
-          <StatCard label="Automations" value={`${ov.automations.enabled}/${ov.automations.total}`} hint={`${ov.automations.fired_total.toLocaleString("en-US")} firings total`} tone="brand" />
-        </button>
-        <button type="button" className="text-start" onClick={() => onNavigate("tasks")}>
-          <StatCard label="Open tasks" value={ov.tasks_open} hint="created by automations" tone={ov.tasks_open ? "warning" : "default"} />
-        </button>
-        <button type="button" className="text-start" onClick={() => onNavigate("data", "review")}>
-          <StatCard label="Review queue" value={ov.review_open} hint="records needing a human fix" tone={ov.review_open ? "warning" : "default"} />
-        </button>
-        <StatCard label="Avg job duration" value={ov.runs.avg_duration_ms != null ? `${ov.runs.avg_duration_ms} ms` : "—"} />
+      <StatStrip>
+        <StatCard onClick={() => onNavigate("integrations")} label="Integrations" value={connected} hint={problems ? `${problems} need attention` : `${ov.integrations.not_configured ?? 0} not configured`} tone={problems ? "warning" : "default"} />
         <StatCard
-          label="Last failure"
-          value={ov.runs.last_failure ? relativeTime(ov.runs.last_failure.started_at) : "none"}
-          hint={ov.runs.last_failure ? `${ov.runs.last_failure.job_id.replace(/_/g, " ")}: ${ov.runs.last_failure.error ?? ""}` : undefined}
-          tone={ov.runs.last_failure ? "danger" : "success"}
+          onClick={() => onNavigate("schedules")}
+          label="Scheduled jobs"
+          value={`${ov.jobs.enabled}/${ov.jobs.total}`}
+          hint={
+            ov.jobs.failing
+              ? `${ov.jobs.failing} failing`
+              : ov.runs.last_failure
+                ? `last failure ${relativeTime(ov.runs.last_failure.started_at)}`
+                : "all healthy"
+          }
+          tone={ov.jobs.failing ? "danger" : "default"}
         />
-      </div>
+        <StatCard
+          onClick={() => onNavigate("activity")}
+          label={`Runs · last ${ov.runs.window_hours}h`}
+          value={ov.runs.runs}
+          hint={
+            rate == null
+              ? "no runs yet"
+              : `${Math.round(rate * 100)}% success · ${ov.runs.failed} failed${ov.runs.avg_duration_ms != null ? ` · avg ${ov.runs.avg_duration_ms} ms` : ""}`
+          }
+          tone={ov.runs.failed ? "warning" : "default"}
+        />
+        <StatCard onClick={() => onNavigate("automations")} label="Automations" value={`${ov.automations.enabled}/${ov.automations.total}`} hint={`${ov.automations.fired_total.toLocaleString("en-US")} firings total`} />
+        <StatCard onClick={() => onNavigate("tasks")} label="Open tasks" value={ov.tasks_open} hint="created by automations" tone={ov.tasks_open ? "warning" : "default"} />
+        <StatCard onClick={() => onNavigate("data", "review")} label="Review queue" value={ov.review_open} hint="records needing a human fix" tone={ov.review_open ? "warning" : "default"} />
+      </StatStrip>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <QuickCard title="Where leads come from" body="Connect CRMs, webhooks and CSV drops. Each source is health-checked and shown with its last activity." cta="Open integrations" onClick={() => onNavigate("integrations")} />

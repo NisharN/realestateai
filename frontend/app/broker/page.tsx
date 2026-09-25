@@ -6,7 +6,7 @@ import { brokerApi, type BrokerToday } from "@/lib/api";
 import { relativeTime } from "@/lib/broker-format";
 import { useBrokerScope } from "@/lib/use-broker-scope";
 import { LeadCard, Panel, StatusBanner } from "@/components/broker/lead-card";
-import { Badge, Page, PageHeader, StatCard } from "@/components/ui/page";
+import { Badge, Page, PageHeader, StatCard, StatStrip } from "@/components/ui/page";
 import { CalendarClock, Phone } from "lucide-react";
 
 export default function BrokerTodayPage() {
@@ -74,14 +74,14 @@ export default function BrokerTodayPage() {
       />
 
       {counts && (
-        <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard label="New handoffs" value={counts.new_handoffs.toLocaleString("en-US")} tone="brand" />
-          <StatCard label="Accepted" value={counts.accepted.toLocaleString("en-US")} tone="success" />
-          <StatCard label="Hot leads" value={counts.hot_leads.toLocaleString("en-US")} tone="danger" />
+        <StatStrip className="mt-6">
+          <StatCard label="New handoffs" value={counts.new_handoffs.toLocaleString("en-US")} tone={counts.new_handoffs ? "brand" : "default"} />
+          <StatCard label="Accepted" value={counts.accepted.toLocaleString("en-US")} />
+          <StatCard label="Hot leads" value={counts.hot_leads.toLocaleString("en-US")} tone={counts.hot_leads ? "danger" : "default"} />
           <StatCard label="Viewings" value={counts.viewings.toLocaleString("en-US")} />
-          <StatCard label="Follow-ups due" value={counts.followups_due.toLocaleString("en-US")} tone="warning" />
+          <StatCard label="Follow-ups due" value={counts.followups_due.toLocaleString("en-US")} tone={counts.followups_due ? "warning" : "default"} />
           <StatCard label="Escalated" value={counts.escalated.toLocaleString("en-US")} tone={counts.escalated ? "danger" : "default"} />
-        </div>
+        </StatStrip>
       )}
 
       <div className="mt-4 space-y-3">

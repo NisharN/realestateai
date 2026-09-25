@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { MapPin } from "lucide-react";
 import type { AreaAnswer } from "@/lib/api";
@@ -18,10 +17,8 @@ export function AreaCard({ area, t, lang }: { area: AreaAnswer; t: Strings; lang
     lang === "ar" && x.to_name_ar ? x.to_name_ar : x.to_name_en;
 
   return (
-    <motion.article
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-card rounded-2xl shadow-lg overflow-hidden border border-border max-w-md"
+    <article
+      className="bg-card rounded-xl overflow-hidden border border-border max-w-md"
       data-testid="area-card"
     >
       <InlineMap
@@ -38,7 +35,7 @@ export function AreaCard({ area, t, lang }: { area: AreaAnswer; t: Strings; lang
         interactive
       />
       <div className="p-4">
-        <div className="flex items-center gap-1 text-foreground font-semibold text-sm mb-2">
+        <div className="flex items-center gap-1 text-foreground font-medium text-sm mb-2">
           <MapPin className="w-3.5 h-3.5 text-brand" />
           {name}
         </div>
@@ -69,6 +66,6 @@ export function AreaCard({ area, t, lang }: { area: AreaAnswer; t: Strings; lang
           </ul>
         )}
       </div>
-    </motion.article>
+    </article>
   );
 }

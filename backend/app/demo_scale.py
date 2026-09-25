@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List
 
 from app.modules.geo.communities import COMMUNITIES
+from app.seed_data import PHOTOS
 
 TIMELINE_LABEL = {
     "immediate": "ASAP", "1_3_months": "within 3 months", "3_6_months": "3–6 months",
@@ -106,7 +107,7 @@ def scale_properties(count: int, seed: str = "scale-properties-v1") -> Iterator[
             "bedrooms": beds,
             "bathrooms": max(1, beds),
             "size_sqft": size,
-            "images": ["https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800"],
+            "images": [_pick(rng, PHOTOS[ptype])],
             "map_lat": round(c.lat + rng.uniform(-0.01, 0.01), 6),
             "map_lng": round(c.lng + rng.uniform(-0.01, 0.01), 6),
             "amenities": rng.sample(AMENITIES, k=4),
