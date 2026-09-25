@@ -1,0 +1,715 @@
+"""Co-work Connections: configured external systems, health tests, webhooks and actions.
+
+A *connection* is one configured instance of a provider from ``providers.py``
+(e.g. "Property Finder — Marina office"). It stores credentials (never
+returned to clients), exposes an HMAC-signed inbound webhook, can be
+health-tested, and offers ``execute_action`` — the primitive routines use to
+pull listings, fetch leads, send messages, create calendar events, etc.
+
+Without credentials every action reports ``simulated: true`` and explains what
+is missing instead of pretending it talked to the provider.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import secrets
+from collections.abc import Callable
+from email.message import EmailMessage
+from typing import Any, Literal
+
+import httpx
+from pydantic import BaseModel, Field
+
+from app.config import get_settings
+from app.modules.cowork.providers import (
+    PROVIDERS,
+    ProviderSpec,
+    get_provider,
+    secret_keys,
+)
+from app.modules.ingestion.connectors.base import (
+    SignatureError,
+    land,
+    verify_hmac_sha256,
+)
+from app.modules.ingestion.connectors.crm_pull import (
+    pin_crm_url,
+    safe_error,
+    validate_crm_url,
+)
+from app.modules.ingestion.models import RawRecord
+from app.modules.store import Row, new_id, now_iso, table
+
+logger = logging.getLogger(__name__)
+
+TABLE = "cowork_connections"
+REDACTED = "••••••••"
+HTTP_TIMEOUT_S = 8.0
+MAX_ITEMS = 500
+
+ConnStatus = Literal["active", "paused"]
+TestStatus = Literal["ok", "failed", "skipped"]
+
+ClientFactory = Callable[[], httpx.AsyncClient]
+_client_factory: ClientFactory = lambda: httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, follow_redirects=False)
+
+
+def set_client_factory(factory: ClientFactory | None) -> None:
+    """Tests inject a mocked ``httpx.AsyncClient``."""
+    global _client_factory
+    _client_factory = factory or (lambda: httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, follow_redirects=False))
+
+
+# --------------------------------------------------------------------------- models
+
+
+class ConnectionIn(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=40)
+    display_name: str | None = Field(None, max_length=120)
+    config: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class ConnectionPatch(BaseModel):
+    display_name: str | None = Field(None, max_length=120)
+    config: dict[str, str] | None = None
+    enabled: bool | None = None
+    rotate_webhook_secret: bool = False
+
+
+def _validate_config(spec: ProviderSpec, config: dict[str, str]) -> dict[str, str]:
+    allowed = {f.key for f in spec.fields} | {"listings_path", "leads_path"}
+    unknown = set(config) - allowed
+    if unknown:
+        raise ValueError(f"unknown config keys for {spec.id}: {', '.join(sorted(unknown))}")
+    cleaned = {k: str(v).strip() for k, v in config.items() if str(v).strip()}
+    for key in ("base_url", "feed_url", "webhook_url"):
+        if cleaned.get(key):
+            cleaned[key] = validate_crm_url(cleaned[key])
+    return cleaned
+
+
+def missing_required(spec: ProviderSpec, config: dict[str, str]) -> list[str]:
+    return [f.label for f in spec.fields if f.required and not config.get(f.key)]
+
+
+def public_view(row: Row) -> Row:
+    spec = get_provider(row["provider"])
+    cfg = dict(row.get("config") or {})
+    secret = secret_keys(spec) if spec else set()
+    shown = {k: (REDACTED if k in secret else v) for k, v in cfg.items()}
+    out = {k: v for k, v in row.items() if k not in ("config", "webhook_secret")}
+    out["config"] = shown
+    out["has_webhook_secret"] = bool(row.get("webhook_secret"))
+    out["missing"] = missing_required(spec, cfg) if spec else []
+    out["health"] = health_of(row, spec)
+    out["provider_name"] = spec.name if spec else row["provider"]
+    out["category"] = spec.category if spec else "data"
+    out["capabilities"] = list(spec.capabilities) if spec else []
+    out["inbound_webhook"] = bool(spec and spec.inbound_webhook)
+    out["certification"] = spec.certification if spec else None
+    return out
+
+
+def health_of(row: Row, spec: ProviderSpec | None) -> str:
+    if row.get("status") == "paused":
+        return "paused"
+    if spec and missing_required(spec, row.get("config") or {}):
+        return "not_configured"
+    if row.get("last_error"):
+        return "error"
+    if row.get("last_test_status") == "failed":
+        return "degraded"
+    if row.get("last_test_status") == "ok":
+        return "connected"
+    return "untested"
+
+
+# --------------------------------------------------------------------------- CRUD
+
+
+def catalog() -> list[dict[str, Any]]:
+    return [p.to_public() for p in PROVIDERS]
+
+
+async def list_connections(workspace_id: str) -> list[Row]:
+    rows = await table(TABLE, workspace_id).select(order="created_at", desc=True, limit=200)
+    return [public_view(r) for r in rows]
+
+
+async def get_connection(workspace_id: str, connection_id: str) -> Row | None:
+    return await table(TABLE, workspace_id).get(id=connection_id)
+
+
+async def create_connection(workspace_id: str, body: ConnectionIn, *, actor: str | None) -> Row:
+    spec = get_provider(body.provider)
+    if not spec:
+        raise ValueError(f"unknown provider {body.provider!r}")
+    config = _validate_config(spec, body.config)
+    row = await table(TABLE, workspace_id).insert(
+        {
+            "id": new_id(),
+            "provider": spec.id,
+            "display_name": body.display_name or spec.name,
+            "config": config,
+            "webhook_secret": secrets.token_hex(24) if spec.inbound_webhook else None,
+            "status": "active" if body.enabled else "paused",
+            "last_test_at": None,
+            "last_test_status": None,
+            "last_test_detail": None,
+            "last_error": None,
+            "last_activity_at": None,
+            "received_total": 0,
+            "created_by": actor,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+    )
+    return public_view(row)
+
+
+async def patch_connection(workspace_id: str, connection_id: str, body: ConnectionPatch) -> Row | None:
+    t = table(TABLE, workspace_id)
+    row = await t.get(id=connection_id)
+    if not row:
+        return None
+    spec = get_provider(row["provider"])
+    updates: Row = {"updated_at": now_iso()}
+    if body.display_name is not None:
+        updates["display_name"] = body.display_name
+    if body.config is not None and spec:
+        merged = dict(row.get("config") or {})
+        incoming = _validate_config(spec, body.config)
+        for k in body.config:  # empty string clears a value; redacted marker keeps it
+            if body.config[k] == REDACTED:
+                continue
+            if k in incoming:
+                merged[k] = incoming[k]
+            else:
+                merged.pop(k, None)
+        updates["config"] = merged
+        updates["last_error"] = None
+    if body.enabled is not None:
+        updates["status"] = "active" if body.enabled else "paused"
+    if body.rotate_webhook_secret and spec and spec.inbound_webhook:
+        updates["webhook_secret"] = secrets.token_hex(24)
+    rows = await t.update(updates, id=connection_id)
+    return public_view(rows[0]) if rows else None
+
+
+async def delete_connection(workspace_id: str, connection_id: str) -> bool:
+    return (await table(TABLE, workspace_id).delete(id=connection_id)) > 0
+
+
+async def reveal_webhook(workspace_id: str, connection_id: str) -> dict[str, Any] | None:
+    """Return the inbound URL + secret once so an external system can be configured."""
+    row = await get_connection(workspace_id, connection_id)
+    if not row or not row.get("webhook_secret"):
+        return None
+    return {
+        "url": webhook_url(workspace_id, connection_id),
+        "secret": row["webhook_secret"],
+        "signature_header": "X-Signature-256",
+        "algorithm": "HMAC-SHA256 hex of the raw body, optionally prefixed with 'sha256='",
+    }
+
+
+def webhook_url(workspace_id: str, connection_id: str) -> str:
+    base = (get_settings().PUBLIC_API_URL or "").rstrip("/")
+    return f"{base}/api/v1/cowork/webhooks/{connection_id}?workspace_id={workspace_id}"
+
+
+# --------------------------------------------------------------------------- health tests
+
+
+async def _record_test(workspace_id: str, connection_id: str, status: TestStatus, detail: str, *, error: str | None = None) -> None:
+    await table(TABLE, workspace_id).update(
+        {
+            "last_test_at": now_iso(),
+            "last_test_status": status,
+            "last_test_detail": detail[:500],
+            "last_error": error[:500] if error else None,
+            "updated_at": now_iso(),
+        },
+        id=connection_id,
+    )
+
+
+def _auth_headers(spec: ProviderSpec, cfg: dict[str, str]) -> dict[str, str]:
+    token = cfg.get("access_token") or cfg.get("api_key")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _ping_request(spec: ProviderSpec, cfg: dict[str, str]) -> tuple[str, str, dict[str, Any] | None]:
+    """(method, url, json_body) for the cheapest authenticated call each provider offers."""
+    base = (cfg.get("base_url") or "").rstrip("/")
+    if spec.id == "hubspot":
+        return "GET", "https://api.hubapi.com/crm/v3/objects/contacts?limit=1", None
+    if spec.id == "whatsapp":
+        return "GET", f"https://graph.facebook.com/v20.0/{cfg.get('phone_number_id')}", None
+    if spec.id == "gmail":
+        return "GET", "https://gmail.googleapis.com/gmail/v1/users/me/profile", None
+    if spec.id == "google_calendar":
+        return "GET", f"https://www.googleapis.com/calendar/v3/calendars/{cfg.get('calendar_id') or 'primary'}", None
+    if spec.id == "google_sheets":
+        return "GET", f"https://sheets.googleapis.com/v4/spreadsheets/{cfg.get('spreadsheet_id')}?fields=spreadsheetId", None
+    if spec.id == "slack":
+        return "POST", cfg.get("webhook_url") or "", {"text": "Co-work connection test — this Slack webhook is wired up."}
+    if spec.id == "bitrix24":
+        return "GET", f"{(cfg.get('webhook_url') or '').rstrip('/')}/profile.json", None
+    if spec.id == "zoho_crm":
+        return "GET", f"{base or 'https://www.zohoapis.com'}/crm/v2/settings/modules", None
+    if spec.id == "propertybase":
+        return "GET", f"{base}/services/data/", None
+    if spec.id == "realestate_crm":
+        return "GET", f"{base}/health", None
+    if spec.id == "property_finder":
+        return "GET", f"{base or 'https://api.propertyfinder.ae'}{cfg.get('listings_path') or '/v1/listings'}?limit=1", None
+    return "GET", base, None
+
+
+async def _http(method: str, url: str, *, headers: dict[str, str], body: dict[str, Any] | None = None) -> httpx.Response:
+    pinned = pin_crm_url(url)
+    async with _client_factory() as client:
+        return await client.request(
+            method,
+            pinned.url,
+            headers={**headers, **pinned.headers},
+            json=body,
+            extensions=pinned.extensions or None,
+        )
+
+
+async def test_connection(workspace_id: str, connection_id: str) -> dict[str, Any]:
+    row = await get_connection(workspace_id, connection_id)
+    if not row:
+        raise LookupError("connection not found")
+    spec = get_provider(row["provider"])
+    if not spec:
+        raise LookupError("unknown provider")
+    cfg = dict(row.get("config") or {})
+    missing = missing_required(spec, cfg)
+    if missing:
+        detail = f"Not configured: {', '.join(missing)} missing"
+        await _record_test(workspace_id, connection_id, "failed", detail, error=detail)
+        return {"status": "failed", "detail": detail, "missing": missing}
+
+    if spec.test_method == "llm_ping":
+        from app.modules.llm.gateway import get_gateway
+
+        gw = get_gateway()
+        ok = bool(gw.available)
+        detail = "LLM provider configured" if ok else "No LLM provider key set — routines fall back to deterministic rules"
+        await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
+        return {"status": "ok" if ok else "failed", "detail": detail}
+
+    if spec.test_method == "webhook":
+        detail = "Inbound webhook ready — send a signed test from the Webhook panel"
+        await _record_test(workspace_id, connection_id, "ok", detail)
+        return {"status": "ok", "detail": detail, "webhook_url": webhook_url(workspace_id, connection_id)}
+
+    if spec.test_method == "feed_fetch":
+        url = cfg.get("feed_url") or ""
+        try:
+            resp = await _http("GET", url, headers={})
+            ok = resp.status_code < 400
+            ctype = resp.headers.get("content-type", "")
+            detail = f"Feed responded {resp.status_code} ({ctype or 'no content-type'})" if ok else f"Feed returned HTTP {resp.status_code}"
+            if ok and "xml" not in ctype and not resp.text.lstrip().startswith("<"):
+                ok, detail = False, f"Feed responded {resp.status_code} but is not XML"
+        except Exception as exc:  # noqa: BLE001
+            ok, detail = False, safe_error(exc)
+        await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
+        return {"status": "ok" if ok else "failed", "detail": detail}
+
+    # http_ping
+    method, url, body = _ping_request(spec, cfg)
+    if not url:
+        detail = "No endpoint configured"
+        await _record_test(workspace_id, connection_id, "failed", detail, error=detail)
+        return {"status": "failed", "detail": detail}
+    try:
+        resp = await _http(method, url, headers=_auth_headers(spec, cfg), body=body)
+        if resp.status_code in (401, 403):
+            ok, detail = False, f"{spec.name} rejected the credentials (HTTP {resp.status_code})"
+        elif resp.status_code >= 400:
+            ok, detail = False, f"{spec.name} returned HTTP {resp.status_code}"
+        else:
+            ok, detail = True, f"{spec.name} reachable (HTTP {resp.status_code})"
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, safe_error(exc)
+    await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
+    return {"status": "ok" if ok else "failed", "detail": detail}
+
+
+# --------------------------------------------------------------------------- inbound webhooks
+
+
+SAMPLE_LEADS: dict[str, dict[str, Any]] = {
+    "property_finder": {
+        "event": "lead.created",
+        "lead": {"id": "pf-test-1", "name": "Test Buyer", "phone": "+971501234567", "email": "buyer@example.com", "message": "Interested in 2BR in Dubai Marina", "listing_reference": "PF-12345"},
+    },
+    "bayut": {"lead_id": "bayut-test-1", "name": "Test Buyer", "mobile": "+971501234567", "email": "buyer@example.com", "message": "Is this villa still available?", "listing_reference": "BY-777"},
+    "dubizzle": {"lead_id": "dz-test-1", "name": "Test Buyer", "mobile": "+971501234567", "email": "buyer@example.com", "message": "Viewing this weekend?", "listing_reference": "DZ-42"},
+    "realestate_crm": {"event": "lead.updated", "lead": {"id": "crm-test-1", "first_name": "Test", "last_name": "Buyer", "phone": "+971501234567", "stage": "qualified", "budget_max_aed": 2500000}},
+    "whatsapp": {"entry": [{"changes": [{"value": {"messages": [{"from": "971501234567", "text": {"body": "Hi, looking for a villa"}}]}}]}]},
+    "portal_webhook": {"external_id": "web-test-1", "name": "Test Buyer", "phone": "+971501234567", "email": "buyer@example.com", "message": "Website form test", "source": "website"},
+}
+
+
+def sign(secret: str, body: bytes) -> str:
+    return "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
+def normalize_inbound(provider: str, data: Any) -> list[RawRecord]:
+    """Map a provider payload into raw lead records the ingestion pipeline understands."""
+    items: list[dict[str, Any]]
+    if isinstance(data, list):
+        items = [i for i in data if isinstance(i, dict)]
+    elif isinstance(data, dict):
+        if isinstance(data.get("records"), list):
+            items = [i for i in data["records"] if isinstance(i, dict)]
+        elif isinstance(data.get("leads"), list):
+            items = [i for i in data["leads"] if isinstance(i, dict)]
+        elif isinstance(data.get("lead"), dict):
+            items = [{**data["lead"], "event": data.get("event")}]
+        elif provider == "whatsapp" and isinstance(data.get("entry"), list):
+            items = []
+            for entry in data["entry"]:
+                for change in (entry or {}).get("changes", []) or []:
+                    for msg in ((change or {}).get("value") or {}).get("messages", []) or []:
+                        items.append({"phone": msg.get("from"), "message": ((msg.get("text") or {}).get("body")), "external_id": msg.get("id")})
+        else:
+            items = [data]
+    else:
+        raise ValueError("payload must be a JSON object or list")
+
+    records: list[RawRecord] = []
+    for item in items[:MAX_ITEMS]:
+        payload = {
+            "external_id": item.get("id") or item.get("lead_id") or item.get("external_id"),
+            "name": item.get("name") or " ".join(x for x in (item.get("first_name"), item.get("last_name")) if x) or None,
+            "first_name": item.get("first_name"),
+            "last_name": item.get("last_name"),
+            "phone": item.get("phone") or item.get("mobile") or item.get("phone_number"),
+            "email": item.get("email"),
+            "message": item.get("message") or item.get("enquiry") or item.get("notes"),
+            "listing_reference": item.get("listing_reference") or item.get("reference") or item.get("property_reference"),
+            "stage": item.get("stage"),
+            "budget_max_aed": item.get("budget_max_aed") or item.get("budget"),
+            "source": provider,
+            "raw": item,
+        }
+        payload = {k: v for k, v in payload.items() if v not in (None, "")}
+        ext = payload.get("external_id")
+        records.append(RawRecord(external_id=str(ext) if ext else None, payload=payload, source_hint=provider))
+    return records
+
+
+async def handle_inbound(
+    workspace_id: str,
+    connection_id: str,
+    headers: dict[str, str],
+    body: bytes,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Verify signature, normalize and land. ``dry_run`` validates without persisting."""
+    row = await get_connection(workspace_id, connection_id)
+    if not row:
+        raise LookupError("connection not found")
+    spec = get_provider(row["provider"])
+    if not spec or not spec.inbound_webhook:
+        raise LookupError("connection has no inbound webhook")
+    if row.get("status") != "active":
+        raise PermissionError(f"connection is {row.get('status')}")
+    secret = row.get("webhook_secret")
+    if not secret:
+        raise PermissionError("webhook has no signing secret")
+    lowered = {k.lower(): v for k, v in headers.items()}
+    provided = lowered.get("x-signature-256") or lowered.get("x-hub-signature-256") or lowered.get("x-signature")
+    if not verify_hmac_sha256(secret, body, provided):
+        if not dry_run:
+            await table(TABLE, workspace_id).update({"last_error": "invalid webhook signature", "updated_at": now_iso()}, id=connection_id)
+        raise SignatureError("invalid signature")
+    try:
+        data = json.loads(body.decode("utf-8") or "null")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ValueError("invalid json") from exc
+    records = normalize_inbound(spec.id, data)
+    if dry_run:
+        return {"status": "ok", "dry_run": True, "records": [r.payload for r in records], "count": len(records)}
+    result = await land(records, connector_id=None, workspace_id=workspace_id)
+    await table(TABLE, workspace_id).update(
+        {
+            "last_activity_at": now_iso(),
+            "received_total": int(row.get("received_total") or 0) + len(result.landed),
+            "last_error": None,
+            "updated_at": now_iso(),
+        },
+        id=connection_id,
+    )
+    return {"status": "ok", "landed": len(result.landed), "duplicates": result.duplicates, "raw_ids": result.ids}
+
+
+async def test_webhook(workspace_id: str, connection_id: str) -> dict[str, Any]:
+    """Sign a provider-shaped sample with the stored secret and run it through the inbound path."""
+    row = await get_connection(workspace_id, connection_id)
+    if not row:
+        raise LookupError("connection not found")
+    sample = SAMPLE_LEADS.get(row["provider"]) or SAMPLE_LEADS["portal_webhook"]
+    body = json.dumps(sample).encode("utf-8")
+    secret = row.get("webhook_secret") or ""
+    try:
+        out = await handle_inbound(workspace_id, connection_id, {"X-Signature-256": sign(secret, body)}, body, dry_run=True)
+        detail = f"Signature verified, {out['count']} record(s) parsed"
+        status: TestStatus = "ok"
+    except (SignatureError, ValueError, PermissionError, LookupError) as exc:
+        out = {"status": "failed", "error": str(exc)}
+        detail = f"Webhook test failed: {exc}"
+        status = "failed"
+    await table(TABLE, workspace_id).update(
+        {"last_test_at": now_iso(), "last_test_status": status, "last_test_detail": detail, "updated_at": now_iso()},
+        id=connection_id,
+    )
+    return {**out, "detail": detail, "url": webhook_url(workspace_id, connection_id), "sample": sample}
+
+
+# --------------------------------------------------------------------------- actions (used by routines)
+
+ActionName = Literal[
+    "pull_listings",
+    "pull_leads",
+    "push_lead",
+    "send_message",
+    "send_email",
+    "create_event",
+    "notify",
+]
+
+
+def _simulated(reason: str, **extra: Any) -> dict[str, Any]:
+    return {"simulated": True, "reason": reason, **extra}
+
+
+def _dig(obj: Any, path: str | None) -> Any:
+    if not path:
+        return obj
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
+def normalize_listing(provider: str, item: dict[str, Any]) -> dict[str, Any] | None:
+    ref = item.get("reference") or item.get("id") or item.get("listing_reference") or item.get("external_id")
+    if not ref:
+        return None
+    price = item.get("price") or item.get("price_aed") or _dig(item, "price.value")
+    try:
+        price_f = float(price) if price not in (None, "") else None
+    except (TypeError, ValueError):
+        price_f = None
+    ptype = str(item.get("property_type") or item.get("type") or "apartment").lower()
+    offering = str(item.get("offering_type") or item.get("listing_type") or item.get("purpose") or "sale").lower()
+    listing_type = "rent" if "rent" in offering else "sale"
+    return {
+        "source": provider,
+        "source_id": str(ref),
+        "source_url": item.get("url") or item.get("source_url"),
+        "title": item.get("title") or f"{ptype.title()} in {item.get('community') or item.get('area') or 'Dubai'}",
+        "description": item.get("description"),
+        "property_type": ptype if ptype in ("apartment", "villa", "townhouse", "penthouse") else "apartment",
+        "listing_type": listing_type,
+        "area": item.get("community") or item.get("area") or item.get("location"),
+        "price": price_f,
+        "bedrooms": item.get("bedrooms") or item.get("beds"),
+        "bathrooms": item.get("bathrooms") or item.get("baths"),
+        "size_sqft": item.get("size_sqft") or item.get("size"),
+        "images": item.get("images") or ([item["image"]] if item.get("image") else []),
+        "permit_number": item.get("permit_number") or item.get("rera_permit") or item.get("trakheesi"),
+        "is_active": item.get("is_active", True),
+        "updated_at": now_iso(),
+    }
+
+
+async def _upsert_listings(workspace_id: str, provider: str, items: list[dict[str, Any]]) -> dict[str, int]:
+    from app.database import get_property_repository
+
+    repo = get_property_repository(workspace_id)
+    created = updated = skipped = 0
+    for item in items[:MAX_ITEMS]:
+        listing = normalize_listing(provider, item)
+        if not listing:
+            skipped += 1
+            continue
+        existing = await repo.get_by_source_ref(provider, source_id=listing["source_id"])
+        if existing:
+            await repo.update(existing["id"], {k: v for k, v in listing.items() if k not in ("source", "source_id")})
+            updated += 1
+        else:
+            await repo.create({**listing, "created_at": now_iso()})
+            created += 1
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+async def execute_action(workspace_id: str, connection_row: Row, action: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Run one connector action. Never raises for provider failures; returns a result dict."""
+    spec = get_provider(connection_row["provider"])
+    if not spec:
+        return {"ok": False, "error": "unknown provider"}
+    if connection_row.get("status") != "active":
+        return {"ok": False, "error": f"connection is {connection_row.get('status')}"}
+    if action not in spec.capabilities and not (action == "push_lead" and "push_leads" in spec.capabilities):
+        return {"ok": False, "error": f"{spec.name} cannot {action}"}
+    cfg = dict(connection_row.get("config") or {})
+    missing = missing_required(spec, cfg)
+    if missing:
+        return {"ok": True, **_simulated(f"{spec.name} not configured ({', '.join(missing)} missing)", action=action)}
+    try:
+        if action == "pull_listings":
+            return await _pull_listings(workspace_id, spec, cfg, params)
+        if action == "pull_leads":
+            return await _pull_leads(workspace_id, spec, cfg, params)
+        if action == "push_lead":
+            return await _push_lead(spec, cfg, params)
+        if action == "send_message":
+            return await _send_message(spec, cfg, params)
+        if action == "send_email":
+            return await _send_email(spec, cfg, params)
+        if action == "create_event":
+            return await _create_event(spec, cfg, params)
+        if action == "notify":
+            return await _notify(spec, cfg, params)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("connector action %s on %s failed: %s", action, spec.id, safe_error(exc))
+        return {"ok": False, "error": safe_error(exc)}
+    return {"ok": False, "error": f"unsupported action {action}"}
+
+
+async def _get_json(spec: ProviderSpec, cfg: dict[str, str], url: str) -> Any:
+    resp = await _http("GET", url, headers=_auth_headers(spec, cfg))
+    if resp.status_code >= 400:
+        raise ValueError(f"{spec.name} returned HTTP {resp.status_code}")
+    return resp.json()
+
+
+def _items(data: Any, path: str | None) -> list[dict[str, Any]]:
+    found = _dig(data, path) if path else None
+    if found is None:
+        if isinstance(data, list):
+            found = data
+        elif isinstance(data, dict):
+            for key in ("data", "items", "results", "listings", "leads", "result"):
+                if isinstance(data.get(key), list):
+                    found = data[key]
+                    break
+    return [i for i in (found or []) if isinstance(i, dict)]
+
+
+async def _pull_listings(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    base = (cfg.get("base_url") or ("https://api.propertyfinder.ae" if spec.id == "property_finder" else "")).rstrip("/")
+    path = cfg.get("listings_path") or params.get("path") or "/v1/listings"
+    data = await _get_json(spec, cfg, f"{base}{path}")
+    items = _items(data, cfg.get("items_path"))
+    counts = await _upsert_listings(workspace_id, spec.id, items)
+    return {"ok": True, "fetched": len(items), **counts}
+
+
+async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    from app.modules.ingestion.pipeline.processor import process_many
+
+    if spec.id == "bitrix24":
+        url = f"{(cfg.get('webhook_url') or '').rstrip('/')}/crm.lead.list.json"
+    elif spec.id == "hubspot":
+        url = "https://api.hubapi.com/crm/v3/objects/contacts?limit=100&properties=firstname,lastname,phone,email"
+    else:
+        base = (cfg.get("base_url") or "").rstrip("/")
+        url = f"{base}{cfg.get('leads_path') or params.get('path') or '/v1/leads'}" if spec.id != "generic_crm" else base
+    data = await _get_json(spec, cfg, url)
+    items = _items(data, cfg.get("items_path"))
+    records = normalize_inbound(spec.id, items)
+    result = await land(records, connector_id=None, workspace_id=workspace_id)
+    processed = await process_many(result.ids, workspace_id=workspace_id) if result.ids else []
+    return {"ok": True, "fetched": len(items), "landed": len(result.landed), "duplicates": result.duplicates, "processed": len(processed)}
+
+
+async def _push_lead(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    lead = params.get("lead") or {}
+    if spec.id == "bitrix24":
+        url = f"{(cfg.get('webhook_url') or '').rstrip('/')}/crm.lead.add.json"
+        body = {"fields": {"TITLE": lead.get("name") or "Lead", "PHONE": [{"VALUE": lead.get("phone")}], "EMAIL": [{"VALUE": lead.get("email")}]}}
+    elif spec.id == "hubspot":
+        url = "https://api.hubapi.com/crm/v3/objects/contacts"
+        body = {"properties": {"firstname": lead.get("first_name"), "lastname": lead.get("last_name"), "phone": lead.get("phone"), "email": lead.get("email")}}
+    else:
+        url = f"{(cfg.get('base_url') or '').rstrip('/')}{cfg.get('leads_path') or '/v1/leads'}"
+        body = lead
+    resp = await _http("POST", url, headers=_auth_headers(spec, cfg), body=body)
+    return {"ok": resp.status_code < 400, "http_status": resp.status_code}
+
+
+async def _send_message(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    from app.services.whatsapp import get_whatsapp_service
+
+    to, body = str(params.get("to") or ""), str(params.get("body") or "")
+    if not to or not body:
+        return {"ok": False, "error": "to and body are required"}
+    msg = await get_whatsapp_service().send_text(to, body, lead_id=params.get("lead_id"))
+    return {"ok": True, "message_id": msg.id, "mode": get_whatsapp_service().mode}
+
+
+async def _send_email(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    to, subject, body = str(params.get("to") or ""), str(params.get("subject") or ""), str(params.get("body") or "")
+    if not to or not body:
+        return {"ok": False, "error": "to and body are required"}
+    msg = EmailMessage()
+    msg["To"], msg["From"], msg["Subject"] = to, cfg.get("mailbox", ""), subject or "(no subject)"
+    msg.set_content(body)
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    resp = await _http("POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", headers=_auth_headers(spec, cfg), body={"raw": raw})
+    return {"ok": resp.status_code < 400, "http_status": resp.status_code}
+
+
+async def _create_event(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    start, end = params.get("start"), params.get("end")
+    if not start or not end:
+        return {"ok": False, "error": "start and end are required"}
+    body = {
+        "summary": params.get("summary") or "Property viewing",
+        "description": params.get("description"),
+        "location": params.get("location"),
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+        "attendees": [{"email": e} for e in params.get("attendees", []) if e],
+    }
+    cal = cfg.get("calendar_id") or "primary"
+    resp = await _http("POST", f"https://www.googleapis.com/calendar/v3/calendars/{cal}/events", headers=_auth_headers(spec, cfg), body=body)
+    return {"ok": resp.status_code < 400, "http_status": resp.status_code}
+
+
+async def _notify(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    text = str(params.get("text") or params.get("body") or "")
+    if not text:
+        return {"ok": False, "error": "text is required"}
+    if spec.id == "slack":
+        resp = await _http("POST", cfg.get("webhook_url") or "", headers={}, body={"text": text[:4000]})
+        return {"ok": resp.status_code < 400, "http_status": resp.status_code}
+    if spec.id == "whatsapp":
+        return await _send_message(spec, cfg, {"to": params.get("to"), "body": text})
+    return {"ok": False, "error": f"{spec.name} cannot notify"}
+
+
+def counts_by_health(rows: list[Row]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for r in rows:
+        out[r["health"]] = out.get(r["health"], 0) + 1
+    return out

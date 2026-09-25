@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     CRM_BASE_URL: str = ""
     CRM_API_KEY: str = ""
     CRM_WEBHOOK_SECRET: str = ""
+    # Public base URL of this API, used to render inbound webhook URLs for connectors.
+    PUBLIC_API_URL: str = "http://localhost:8000"
 
     LLM_PROVIDERS: str = "groq,secondary,ollama"
     LLM_SECONDARY_API_KEY: str = ""

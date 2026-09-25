@@ -53,7 +53,7 @@ CONDITION_FIELDS = ("score", "band", "stage", "status", "source", "purpose", "ti
 TEMPLATE_FIELDS = ("first_name", "last_name", "stage", "score", "band", "source", "area_preference", "budget_max_aed", "purpose")
 # Jobs an automation may never target: the automation job itself would re-enter
 # the same pending event before its offset is written.
-FORBIDDEN_JOBS = frozenset({"run_automations"})
+FORBIDDEN_JOBS = frozenset({"run_automations", "run_routines"})
 MAX_ATTEMPTS = 3
 STALE_CLAIM_S = 600
 
