@@ -65,6 +65,10 @@ celery_app.conf.update(
             "task": "app.worker.poll_pull_connectors",
             "schedule": 60.0,
         },
+        "crm-writeback": {
+            "task": "app.worker.crm_writeback",
+            "schedule": 60.0,
+        },
     },
 )
 
@@ -404,6 +408,14 @@ def poll_pull_connectors() -> int:
         return landed
 
     return _run_async(_run())
+
+
+@celery_app.task(name="app.worker.crm_writeback")
+def crm_writeback() -> int:
+    """Drain the lead-event outbox into CRM write-backs (idempotent via consumer_offsets)."""
+    from app.modules.ingestion.writeback import run_writeback
+
+    return _run_async(run_writeback(settings.WORKSPACE_ID))
 
 
 @celery_app.task(name="app.worker.process_raw_records")

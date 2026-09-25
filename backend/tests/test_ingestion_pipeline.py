@@ -398,3 +398,39 @@ def test_connector_patch_validates_crm_url():
     r = client.patch(f"/api/v1/admin/connectors/{created['id']}", json={"config": {"url": "https://192.168.1.1/leads"}})
     assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_crm_url"
     assert client.get(f"/api/v1/admin/connectors/{created['id']}").json()["config"]["url"] == "https://crm.test/leads"
+
+
+# -- CRM write-back consumer -------------------------------------------------
+
+async def test_crm_writeback_patches_crm_once_per_event():
+    from app.modules.ingestion.writeback import run_writeback
+
+    patches: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": "crm-9", "Mobile": "0507777777", "Name": "Wb Lead"}])
+        patches.append((str(request.url), json.loads(request.content)))
+        return httpx.Response(200, json={"ok": True})
+
+    created = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "tok", "config": {"url": "https://crm.test/leads", "write_back_url": "https://crm.test/leads/{id}", "write_back_fields": ["score", "stage", "secret_col"]}}).json()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        res = await poll_connector(created["id"], workspace_id=WS, client=http)
+        outcomes = await process_many(res["raw_ids"], workspace_id=WS)
+        assert outcomes[0].status == "published"
+        lead_id = outcomes[0].lead_id
+        await table("lead_events", WS).insert({"lead_id": lead_id, "type": "lead.updated", "payload": {"by": "test"}})
+        assert await run_writeback(WS, client=http) >= 1
+        again = await run_writeback(WS, client=http)
+    assert len(patches) == 1 and patches[0][0] == "https://crm.test/leads/crm-9"
+    assert set(patches[0][1]) <= {"score", "stage"} and "secret_col" not in patches[0][1]
+    assert again == 0  # offsets: redelivery is a no-op
+
+
+async def test_crm_writeback_skips_leads_without_writeback_connector():
+    from app.modules.ingestion.writeback import run_writeback
+
+    lead = await get_lead_repository(WS).create({"name": "Manual", "phone": "+971501230000", "source": "website"})
+    await table("lead_events", WS).insert({"lead_id": lead["id"], "type": "lead.updated", "payload": {}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as http:
+        assert await run_writeback(WS, client=http) == 1  # consumed, nothing sent, no error

@@ -319,6 +319,18 @@ def _reply_facts(move: Move, state: ConversationState, facts: ExtractedFacts, to
         out["area_summary"] = area.summary
         if area.median_price_psf:
             out["area_price_psf"] = f"{area.median_price_psf:,.0f}"
+        if area.travel:
+            approx = any(t.approx for t in area.travel)
+            out["area_travel"] = [
+                {"to": t.to_name_ar if state.language == "ar" else t.to_name_en, "minutes": t.minutes, "km": t.km, "approx": t.approx}
+                for t in area.travel
+            ]
+            first = area.travel[0]
+            out["area_travel_text"] = (
+                (f"حوالي {first.minutes} دقيقة إلى {first.to_name_ar}" if approx else f"{first.minutes} دقيقة إلى {first.to_name_ar}")
+                if state.language == "ar"
+                else (f"about {first.minutes} minutes to {first.to_name_en} (approx.)" if approx else f"{first.minutes} minutes to {first.to_name_en}")
+            )
     cmp = tools.get("compare")
     if cmp is not None and cmp.rows:
         out["compare"] = [r.model_dump() for r in cmp.rows]
