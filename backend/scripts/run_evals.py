@@ -18,6 +18,7 @@ from typing import Any
 import yaml
 
 from scripts._offline_env import EVAL_WORKSPACE_ID  # must import before app settings are read
+from app.config import get_settings
 from app.database import DatabaseClient, _use_mock_store, get_lead_repository, get_property_repository
 from app.modules.conversation.engine import handle_turn
 from app.modules.store import reset_memory
@@ -87,6 +88,9 @@ def assert_offline() -> None:
     """Refuse to run against anything but the in-memory store."""
     if not _use_mock_store() or DatabaseClient.get_client() is not None:
         raise RuntimeError("evals must run offline: a live database client is configured")
+    settings = get_settings()
+    if settings.GROQ_API_KEY or settings.LLM_SECONDARY_API_KEY or settings.LLM_SECONDARY_BASE_URL or settings.LLM_OLLAMA_BASE_URL:
+        raise RuntimeError("evals must run offline: an LLM provider is configured")
 
 
 async def seed_inventory(workspace_id: str) -> None:

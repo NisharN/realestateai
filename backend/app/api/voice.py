@@ -139,7 +139,9 @@ class VoiceSession:
         except asyncio.CancelledError:
             await _send(self.ws, {"type": "cancelled", "turn_id": turn_id})
             if engine is not None:
-                self.drains.add(asyncio.create_task(self._deliver_committed(turn_id, user_text, engine)))
+                drain = asyncio.create_task(self._deliver_committed(turn_id, user_text, engine))
+                self.drains.add(drain)
+                drain.add_done_callback(self.drains.discard)
             raise
         except Exception as exc:
             logger.exception("voice turn failed for lead %s: %s", self.lead_id, exc)
@@ -149,9 +151,14 @@ class VoiceSession:
         """After a barge-in the engine still finishes; its persisted outcome
         (state, handoff) is delivered as a text-only reply rather than hidden."""
         try:
-            result = await asyncio.wait_for(engine, ENGINE_DRAIN_S)
+            result = await asyncio.wait_for(asyncio.shield(engine), ENGINE_DRAIN_S)
+        except asyncio.TimeoutError:
+            # Only delivery gives up; the engine keeps running so the turn is
+            # never left half-persisted.
+            logger.warning("voice engine still running %.0fs after interrupt for lead %s", ENGINE_DRAIN_S, self.lead_id)
+            return
         except Exception as exc:
-            logger.warning("voice engine did not complete after interrupt for lead %s: %s", self.lead_id, exc)
+            logger.warning("voice engine failed after interrupt for lead %s: %s", self.lead_id, exc)
             return
         payload = self._reply_payload(turn_id, user_text, result)
         payload["interrupted"] = True
