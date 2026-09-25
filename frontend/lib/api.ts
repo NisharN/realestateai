@@ -424,6 +424,42 @@ export const conversationsApi = {
 };
 
 // Voice WebSocket
+export interface AreaAnswer {
+  community_id: string;
+  name_en: string;
+  name_ar: string;
+  lat: number;
+  lng: number;
+  listing_count: number;
+  median_price: number | null;
+  median_price_psf: number | null;
+  travel: {
+    to_id: string;
+    to_name_en: string;
+    to_name_ar: string;
+    to_lat: number;
+    to_lng: number;
+    minutes: number;
+    km: number;
+    method: string;
+    approx: boolean;
+  }[];
+}
+
+export interface PropertyCardDto {
+  property_id: string;
+  title: string;
+  price: number | null;
+  area: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  size_sqft: number | null;
+  image: string | null;
+  lat: number | null;
+  lng: number | null;
+  match_reasons: string[];
+}
+
 export type VoiceServerMessage =
   | { type: "ready"; session_id: string; resumed: boolean; tts: boolean; heartbeat_s: number; reply: string; history?: { role: string; text: string; created_at?: string }[] }
   | { type: "transcript"; turn_id: string; text: string; confidence: number | null }
@@ -437,10 +473,11 @@ export type VoiceServerMessage =
       move?: string;
       stage?: string;
       score?: number;
-      properties?: any[];
-      area?: any;
+      properties?: PropertyCardDto[];
+      area?: AreaAnswer | null;
       handoff_id?: string | null;
       ended?: boolean;
+      interrupted?: boolean;
       fallbacks: string[];
       audio?: string;
       audio_format?: string;
@@ -462,7 +499,7 @@ export class VoiceWebSocket {
   private onMessage: (data: VoiceServerMessage) => void;
   private onError: (error: unknown) => void;
   private sessionId: string | null = null;
-  private closed = false;
+  private closed = false; // terminal: a disconnected instance never reopens
   private retries = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   currentTurnId: string | null = null;
@@ -497,7 +534,7 @@ export class VoiceWebSocket {
     if (token) query.set("token", token);
     if (workspaceId) query.set("workspace_id", workspaceId);
     if (this.sessionId) query.set("session_id", this.sessionId);
-    this.closed = false;
+    if (this.closed) return; // disconnect() raced the auth lookup above
     this.ws = new WebSocket(`${wsUrl}/api/v1/voice/conversation/${this.leadId}?${query}`);
 
     this.ws.onmessage = (event) => {

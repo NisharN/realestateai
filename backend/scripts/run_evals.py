@@ -17,10 +17,11 @@ from typing import Any
 
 import yaml
 
-from app.config import get_settings
-from app.database import get_lead_repository
+from scripts._offline_env import EVAL_WORKSPACE_ID  # must import before app settings are read
+from app.database import DatabaseClient, _use_mock_store, get_lead_repository, get_property_repository
 from app.modules.conversation.engine import handle_turn
 from app.modules.store import reset_memory
+from app.seed_data import mock_property_records
 
 CASES = Path(__file__).resolve().parent.parent / "evals" / "cases.yaml"
 
@@ -82,8 +83,24 @@ async def run_case(case: dict[str, Any], workspace_id: str) -> CaseResult:
     return res
 
 
+def assert_offline() -> None:
+    """Refuse to run against anything but the in-memory store."""
+    if not _use_mock_store() or DatabaseClient.get_client() is not None:
+        raise RuntimeError("evals must run offline: a live database client is configured")
+
+
+async def seed_inventory(workspace_id: str) -> None:
+    repo = get_property_repository(workspace_id)
+    if await repo.search_by_criteria(limit=1):
+        return
+    for record in mock_property_records():
+        await repo.create({k: v for k, v in record.items() if k != "workspace_id"})
+
+
 async def run_all(only: str | None = None) -> list[CaseResult]:
-    ws = get_settings().WORKSPACE_ID
+    assert_offline()
+    ws = EVAL_WORKSPACE_ID
+    await seed_inventory(ws)
     results: list[CaseResult] = []
     for case in load_cases():
         if only and only not in case["id"]:

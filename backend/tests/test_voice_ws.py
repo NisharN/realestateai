@@ -123,3 +123,30 @@ def test_resume_replays_history():
         roles = [m["role"] for m in resumed["history"]]
         assert roles == ["user", "assistant"]
         assert resumed["history"][0]["text"] == "I want to rent in JVC"
+
+
+def test_interrupt_after_engine_commit_still_delivers_reply():
+    lead_id = _lead()
+    real_handle_turn = voice_api.handle_turn
+
+    async def slow_tts(*_a, **_k):
+        await asyncio.sleep(5)
+        return b"RIFF"
+
+    with patch.object(voice_api.VoiceService, "text_to_speech", slow_tts):
+        with _connect(lead_id) as ws:
+            ws.receive_json()
+            ws.send_json({"type": "text", "text": "hello", "turn_id": "k1", "want_audio": True})
+            _until(ws, "transcript")
+            asyncio.run(asyncio.sleep(0.5))  # let handle_turn commit; TTS is now blocking
+            ws.send_json({"type": "interrupt"})
+            assert _until(ws, "cancelled")["turn_id"] == "k1"
+            reply = _until(ws, "reply")
+            assert reply["turn_id"] == "k1" and reply["interrupted"] is True and reply["reply"]
+            assert "audio" not in reply
+    assert voice_api.handle_turn is real_handle_turn
+
+
+def test_synthesize_rejects_oversized_text():
+    resp = client.post("/api/v1/voice/synthesize", params={"text": "x" * (voice_api.MAX_TTS_CHARS + 1)})
+    assert resp.status_code == 422
