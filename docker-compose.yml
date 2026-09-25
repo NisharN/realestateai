@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Single-tenant deployment: one stack per brokerage (see PILOT.md).
 # WORKSPACE_ID identifies which brokerage this instance serves.
 #
@@ -23,6 +21,15 @@ x-backend-env: &backend-env
   WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
   META_APP_SECRET: ${META_APP_SECRET:-}
   REDIS_URL: redis://redis:6379/0
+  OSRM_URL: ${OSRM_URL:-http://osrm:5000}
+  PIPER_MODEL_PATH: /app/models/piper
+  RETENTION_RAW_DAYS: ${RETENTION_RAW_DAYS:-90}
+  RETENTION_LEAD_DAYS: ${RETENTION_LEAD_DAYS:-730}
+  # Fault injection (docs/runbooks/deploy.md §Fault drills). Never set in production.
+  FAULT_LLM_ALL: ${FAULT_LLM_ALL:-false}
+  FAULT_STT: ${FAULT_STT:-false}
+  FAULT_TTS: ${FAULT_TTS:-false}
+  FAULT_DB_SLOW_MS: ${FAULT_DB_SLOW_MS:-0}
 
 services:
   backend:
@@ -87,3 +94,43 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
+
+  # Local Postgres with the Supabase migrations applied on first start. The API
+  # talks to Postgres through Supabase's PostgREST/Auth, so this service is for
+  # running migrations and the RLS test matrix locally (docs/runbooks/deploy.md),
+  # or as the database behind a self-hosted Supabase stack.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-realestateai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/supabase/local/00_auth_shim.sql:/docker-entrypoint-initdb.d/00_auth_shim.sql:ro
+      - ./backend/supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      - ./backend/supabase/local/01_apply_migrations.sh:/docker-entrypoint-initdb.d/01_apply_migrations.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Self-hosted routing for the weekly travel-time precompute
+  # (docs/runbooks/osrm.md). Requires ./osrm-data/uae.osrm built once.
+  osrm:
+    image: osrm/osrm-backend:latest
+    profiles: ["osrm"]
+    command: osrm-routed --algorithm mld --max-table-size 200 /data/uae.osrm
+    volumes:
+      - ./osrm-data:/data:ro
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

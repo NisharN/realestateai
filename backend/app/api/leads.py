@@ -167,6 +167,7 @@ class MessageRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     idempotency_key: Optional[str] = Field(None, max_length=128)
     channel: str = "chat"
+    property_id: Optional[str] = Field(None, max_length=64)
 
 
 class MessageResponse(BaseModel):
@@ -184,6 +185,7 @@ class MessageResponse(BaseModel):
     compare: List[dict] = Field(default_factory=list)
     profile: dict
     ended: bool
+    language: str = "en"
     fallbacks: List[str]
     latency_ms: int
 
@@ -204,6 +206,7 @@ def _message_response(lead_id: str, r: TurnResult) -> MessageResponse:
         compare=r.compare,
         profile=r.profile,
         ended=r.ended,
+        language=r.language,
         fallbacks=r.fallbacks,
         latency_ms=r.latency_ms,
     )
@@ -228,6 +231,7 @@ async def send_message(
         channel=message.channel if message.channel in {"chat", "widget", "whatsapp", "voice"} else "chat",
         idempotency_key=message.idempotency_key,
         source=lead.get("source"),
+        property_id=message.property_id,
     )
     await lead_repo.update(lead_id, {"last_contact_at": datetime.utcnow().isoformat()})
     return _message_response(lead_id, result)

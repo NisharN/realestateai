@@ -23,6 +23,15 @@
   --input: 214.3 31.8% 91.4%;
   --ring: 221.2 83.2% 53.3%;
   --radius: 0.5rem;
+
+  /* Brand tokens (buyer surfaces). Change here, not in components. */
+  --brand: 221.2 83.2% 53.3%;
+  --brand-2: 262 83% 58%;
+  --brand-foreground: 0 0% 100%;
+  --surface: 210 20% 98%;
+  --success: 142 71% 45%;
+  --success-soft: 141 84% 93%;
+  --font-ar: "Noto Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
 }
 
 .dark {
@@ -54,6 +63,10 @@
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
+}
+
+[dir="rtl"] {
+  font-family: var(--font-ar);
 }
 
 /* Custom scrollbar */

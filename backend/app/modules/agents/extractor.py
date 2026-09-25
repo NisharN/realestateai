@@ -162,8 +162,8 @@ def _reactions(text: str, state: ConversationState) -> list[Reaction]:
             if re.search(rf"\b{key}\b", text, re.I) or key in text:
                 index = n
                 break
-        for g in (like.group(3), like.group(4)):
-            if g:
+        for g in (like.group(4), like.group(5)):
+            if g and g.isdigit():
                 index = int(g)
     if like and not reject:
         if index and index <= len(current):

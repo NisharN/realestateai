@@ -37,7 +37,7 @@ from app.modules.tools.compare import compare
 from app.modules.tools.viewing_slots import next_slots
 
 from . import policy, templates
-from .facts import ExtractedFacts
+from .facts import ExtractedFacts, Reaction
 from .moves import Move
 from .repository import ConversationRepo
 from .state import ConversationState
@@ -82,6 +82,7 @@ async def handle_turn(
     channel: str = "chat",
     idempotency_key: str | None = None,
     source: str | None = None,
+    property_id: str | None = None,
 ) -> TurnResult:
     settings = get_settings()
     total_budget = settings.TURN_DEADLINE_VOICE_S if channel == "voice" else settings.TURN_DEADLINE_CHAT_S
@@ -98,7 +99,7 @@ async def handle_turn(
 
         state = await repo.load(lead_id, channel=channel, source=source)
         try:
-            return await _run(state, text, repo, workspace_id, deadline, key, started)
+            return await _run(state, text, repo, workspace_id, deadline, key, started, property_id=property_id)
         except Exception as exc:  # last resort: never surface an error to the buyer
             logger.exception("turn failed for lead %s: %s", lead_id, exc)
             state.misunderstandings += 1
@@ -114,6 +115,21 @@ async def handle_turn(
             return _result(state, reply, "error_fallback", {}, int((time.monotonic() - started) * 1000), ["template:exception"])
 
 
+def _focus_property(facts: ExtractedFacts, state: ConversationState, property_id: str) -> None:
+    """Pin a turn to a card the buyer clicked. Only properties we actually showed count;
+    an unknown id is ignored rather than mapped to another listing."""
+    shown = next((p for p in state.shortlist if p.property_id == property_id), None)
+    if shown is None:
+        return
+    facts.focus_property_id = shown.property_id
+    current = state.current_shortlist()
+    index = next((i for i, p in enumerate(current, start=1) if p.property_id == shown.property_id), None)
+    liked = [r for r in facts.reactions if r.reaction == "liked"]
+    if liked or extractor.LIKE_RE.search(facts.text or ""):
+        facts.reactions = [r for r in facts.reactions if r.reaction != "liked"]
+        facts.reactions.append(Reaction(property_id=shown.property_id, property_index=index, reaction="liked"))
+
+
 async def _run(
     state: ConversationState,
     text: str,
@@ -122,6 +138,7 @@ async def _run(
     deadline: Deadline,
     key: str,
     started: float,
+    property_id: str | None = None,
 ) -> TurnResult:
     settings = get_settings()
     state.turn += 1
@@ -149,6 +166,8 @@ async def _run(
         fallbacks.append("extract:rules_only")
     if facts.rules_only and facts.intent != "stop" and facts.intent != "request_human":
         fallbacks.append("extract:rules_only")
+    if property_id:
+        _focus_property(facts, state, property_id)
 
     # 2. merge + score ----------------------------------------------------
     merge(state, facts)
@@ -227,9 +246,9 @@ async def _run_tools(
 
     elif move == Move.ANSWER_PROPERTY:
         current = state.current_shortlist()
-        target = None
+        target = facts.focus_property_id
         for r in facts.reactions:
-            if r.property_id:
+            if r.property_id and target is None:
                 target = r.property_id
         if target is None and current:
             target = current[0].property_id
