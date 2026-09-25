@@ -45,23 +45,32 @@ def _small_words(n: int) -> str:
 
 
 def number_words(value: float) -> str:
-    """Spoken form: exact words below one million, "x point y million" above."""
-    if value >= 1_000_000:
-        millions = value / 1_000_000
-        text = f"{millions:.2f}".rstrip("0").rstrip(".")
-        whole, _, frac = text.partition(".")
-        spoken = _small_words(int(whole))
-        if frac:
+    """Spoken form that never loses digits.
+
+    Round millions read as "one point eight five million"; anything else is
+    spelled out in full ("one million two hundred thirty four thousand five
+    hundred sixty seven").
+    """
+    n = int(round(value))
+    if n >= 1_000_000 and n % 10_000 == 0:
+        whole, rest = divmod(n, 1_000_000)
+        spoken = _small_words(whole)
+        if rest:
+            frac = f"{rest // 10_000:02d}".rstrip("0")
             spoken += " point " + " ".join(_ONES[int(d)] for d in frac)
         return f"{spoken} million"
-    n = int(round(value))
     if n < 1000:
         return _small_words(n)
+    parts: list[str] = []
+    millions, n = divmod(n, 1_000_000)
+    if millions:
+        parts.append(f"{_small_words(millions)} million")
     thousands, rest = divmod(n, 1000)
-    out = f"{_small_words(thousands)} thousand"
+    if thousands:
+        parts.append(f"{_small_words(thousands)} thousand")
     if rest:
-        out += f" {_small_words(rest)}"
-    return out
+        parts.append(_small_words(rest))
+    return " ".join(parts)
 
 
 def _aed(match: re.Match[str]) -> str:

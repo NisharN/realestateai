@@ -3,7 +3,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
-import { leadsApi, propertiesApi, VoiceWebSocket, type VoiceServerMessage } from "@/lib/api";
+import {
+  leadsApi,
+  propertiesApi,
+  VoiceWebSocket,
+  type AreaAnswer,
+  type PropertyCardDto,
+  type VoiceServerMessage,
+} from "@/lib/api";
 import {
   Send,
   Mic,
@@ -51,42 +58,6 @@ interface Message {
 }
 
 // Mirrors backend AreaProfile: every number here is stored inventory / offline gazetteer data.
-interface AreaAnswer {
-  community_id: string;
-  name_en: string;
-  name_ar: string;
-  lat: number;
-  lng: number;
-  listing_count: number;
-  median_price: number | null;
-  median_price_psf: number | null;
-  travel: {
-    to_id: string;
-    to_name_en: string;
-    to_name_ar: string;
-    to_lat: number;
-    to_lng: number;
-    minutes: number;
-    km: number;
-    method: string;
-    approx: boolean;
-  }[];
-}
-
-interface PropertyCardDto {
-  property_id: string;
-  title: string;
-  price: number | null;
-  area: string | null;
-  bedrooms: number | null;
-  bathrooms: number | null;
-  size_sqft: number | null;
-  image: string | null;
-  lat: number | null;
-  lng: number | null;
-  match_reasons: string[];
-}
-
 interface Property {
   id: string;
   title: string;
@@ -108,6 +79,20 @@ const cn = (...classes: (string | boolean | undefined | null)[]) =>
   classes.filter(Boolean).join(" ");
 
 const fmtAED = (n: number) => `AED ${n.toLocaleString()}`;
+
+const toProperty = (p: PropertyCardDto): Property => ({
+  id: String(p.property_id),
+  title: p.title,
+  area: p.area ?? "Dubai",
+  price: p.price ?? 0,
+  bedrooms: p.bedrooms ?? 0,
+  bathrooms: p.bathrooms ?? 0,
+  size_sqft: p.size_sqft ?? 0,
+  images: p.image ? [p.image] : [],
+  map_lat: p.lat,
+  map_lng: p.lng,
+  amenities: p.match_reasons ?? [],
+});
 
 // ─── Property Card ──────────────────────────────────────────────────────────
 function PropertyCard({
@@ -291,8 +276,10 @@ function VoiceModal({
   isOpen: boolean;
   onClose: () => void;
   leadId: string | null;
-  onAgentMessage: (text: string, properties?: Property[]) => void;
+  onAgentMessage: (text: string, properties?: Property[], area?: AreaAnswer) => void;
 }) {
+  const onAgentMessageRef = useRef(onAgentMessage);
+  onAgentMessageRef.current = onAgentMessage;
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState("");
   const [status, setStatus] = useState<"idle" | "listening" | "connecting" | "sending" | "thinking" | "speaking">("idle");
@@ -300,13 +287,17 @@ function VoiceModal({
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Barge-in: stop whatever Ali is saying (server turn + local playback).
-  const stopSpeaking = useCallback(() => {
-    wsRef.current?.interrupt();
+  const stopPlayback = useCallback(() => {
     audioRef.current?.pause();
     audioRef.current = null;
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
   }, []);
+
+  // Barge-in: stop whatever Ali is saying (server turn + local playback).
+  const stopSpeaking = useCallback(() => {
+    wsRef.current?.interrupt();
+    stopPlayback();
+  }, [stopPlayback]);
 
   const speak = useCallback((msg: Extract<VoiceServerMessage, { type: "reply" }>) => {
     if (msg.audio) {
@@ -392,8 +383,8 @@ function VoiceModal({
             break;
           case "reply":
             setResponse(data.reply);
-            onAgentMessage(data.reply, data.properties || []);
-            speak(data);
+            onAgentMessageRef.current(data.reply, (data.properties || []).map(toProperty), data.area ?? undefined);
+            if (!data.interrupted) speak(data);
             break;
           case "cancelled":
           case "error":
@@ -412,8 +403,9 @@ function VoiceModal({
     return () => {
       ws.disconnect();
       wsRef.current = null;
+      stopPlayback();
     };
-  }, [isOpen, leadId, onAgentMessage, speak]);
+  }, [isOpen, leadId, speak, stopPlayback]);
 
   const startRecording = async () => {
     stopSpeaking();
@@ -687,19 +679,7 @@ export default function ChatPage() {
       area?: AreaAnswer | null;
     };
 
-    const properties: Property[] = (data.matched_properties || []).map((p) => ({
-      id: String(p.property_id),
-      title: p.title,
-      area: p.area ?? "Dubai",
-      price: p.price ?? 0,
-      bedrooms: p.bedrooms ?? 0,
-      bathrooms: p.bathrooms ?? 0,
-      size_sqft: p.size_sqft ?? 0,
-      images: p.image ? [p.image] : [],
-      map_lat: p.lat,
-      map_lng: p.lng,
-      amenities: p.match_reasons ?? [],
-    }));
+    const properties: Property[] = (data.matched_properties || []).map(toProperty);
 
     if (properties.length) setMapProperties(properties);
 
@@ -782,19 +762,20 @@ export default function ChatPage() {
     { label: "Palm Jumeirah", icon: null },
   ];
 
-  const onAgentMessageFromVoice = (text: string, properties?: Property[]) => {
+  const onAgentMessageFromVoice = useCallback((text: string, properties?: Property[], area?: AreaAnswer) => {
     setMessages((prev) => [
       ...prev,
       {
         id: String(Date.now()),
         role: "assistant",
         content: text,
-        properties,
+        properties: properties && properties.length ? properties : undefined,
+        area,
         timestamp: new Date(),
       },
     ]);
     if (properties && properties.length) setMapProperties(properties);
-  };
+  }, []);
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-gray-50">

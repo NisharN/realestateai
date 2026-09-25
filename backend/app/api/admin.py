@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import secrets
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -41,8 +42,40 @@ class ConnectorPatch(BaseModel):
     rotate_secret: bool = False
 
 
+SENSITIVE_CONFIG_KEYS = ("secret", "token", "password", "passwd", "api_key", "apikey", "key", "credential", "auth", "private")
+
+
+def _redact_url(value: str) -> str:
+    parts = urlsplit(value)
+    if not parts.scheme or not parts.netloc:
+        return value
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = "[redacted]@" + netloc.rsplit("@", 1)[1]
+    query = "&".join(
+        f"{k}=[redacted]" if any(p in k.lower() for p in SENSITIVE_CONFIG_KEYS) else f"{k}={v}"
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+    )
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def _redact_config(config: Any) -> Any:
+    if isinstance(config, str):
+        return _redact_url(config)
+    if isinstance(config, dict):
+        return {
+            k: ("[redacted]" if isinstance(k, str) and any(p in k.lower() for p in SENSITIVE_CONFIG_KEYS) and k.lower() not in ("auth_header", "auth_raw") and v not in (None, "") else _redact_config(v))
+            for k, v in config.items()
+        }
+    if isinstance(config, list):
+        return [_redact_config(v) for v in config]
+    return config
+
+
 def _public(row: dict[str, Any], *, reveal_secret: bool = False) -> dict[str, Any]:
     out = {k: v for k, v in row.items() if k not in ("secret", "auth_encrypted")}
+    if "config" in out:
+        out["config"] = _redact_config(out["config"])
     out["has_secret"] = bool(row.get("secret"))
     if reveal_secret and row.get("secret"):
         out["secret"] = row["secret"]

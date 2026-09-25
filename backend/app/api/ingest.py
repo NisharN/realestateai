@@ -37,9 +37,11 @@ async def push_webhook(
         raise HTTPException(404, detail={"code": "connector_not_found", "message": "Connector not found"})
     if connector.get("status") != "active":
         raise HTTPException(409, detail={"code": "connector_inactive", "message": f"Connector is {connector.get('status')}"})
+    if not connector.get("secret"):
+        raise HTTPException(409, detail={"code": "connector_unsigned", "message": "Webhook connector has no signing secret; rotate one in admin"})
     body = await request.body()
     try:
-        records = await WebhookConnector(connector.get("secret")).handle_push(dict(request.headers), body)
+        records = await WebhookConnector(connector["secret"]).handle_push(dict(request.headers), body)
     except SignatureError:
         await record_run(connector_id, workspace_id, ok=False, error="invalid signature")
         raise HTTPException(401, detail={"code": "invalid_signature", "message": "Invalid signature"})
@@ -61,9 +63,14 @@ async def upload_csv(
     context: RequestContext = Depends(get_request_context),
 ):
     context.require_roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
-    body = await file.read()
-    if len(body) > MAX_CSV_BYTES:
-        raise HTTPException(413, detail={"code": "file_too_large", "message": "CSV exceeds 5 MB"})
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await file.read(64 * 1024):
+        size += len(chunk)
+        if size > MAX_CSV_BYTES:
+            raise HTTPException(413, detail={"code": "file_too_large", "message": "CSV exceeds 5 MB"})
+        chunks.append(chunk)
+    body = b"".join(chunks)
     records = parse_csv(body, filename=file.filename)
     if not records:
         raise HTTPException(400, detail={"code": "empty_csv", "message": "No rows found"})

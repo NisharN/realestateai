@@ -16,7 +16,7 @@ from app.modules.geo.communities import get_community
 from app.modules.ingestion import events
 from app.modules.ingestion.field_maps import approved_field_map
 from app.modules.ingestion.models import CanonicalLead, MergeResult, PipelineOutcome
-from app.modules.ingestion.pipeline.stages import clean_record, map_record, validate_record
+from app.modules.ingestion.pipeline.stages import clean_phone, clean_record, map_record, validate_record
 from app.modules.store import Row, new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,9 @@ async def process_record(raw_id: str, *, workspace_id: str) -> PipelineOutcome:
         await set_status("validated")
 
         merge = await match_and_merge(cleaned, record, workspace_id)
+        if merge.suppressed:
+            await _to_review(record, workspace_id, "suppressed", {"lead_id": merge.lead_id}, cleaned)
+            return PipelineOutcome(raw_record_id=raw_id, status="review", lead_id=merge.lead_id, reasons=["suppressed"])
         await set_status("merged", lead_id=merge.lead_id)
 
         await enrich(cleaned, merge, workspace_id)
@@ -127,6 +130,8 @@ async def match_and_merge(lead: CanonicalLead, record: Row, workspace_id: str) -
 
     columns = lead_columns(lead)
     if existing:
+        if existing.get("opted_out_at") or "opted_out" in (existing.get("stage"), existing.get("status")):
+            return MergeResult(lead_id=existing["id"], created=False, matched_by=matched_by, suppressed=True, changed_fields=[])  # type: ignore[arg-type]
         updates, changed = merge_updates(existing, columns)
         if updates:
             updates["updated_at"] = now_iso()
@@ -172,9 +177,13 @@ def lead_columns(lead: CanonicalLead) -> dict[str, Any]:
     return {k: v for k, v in cols.items() if v is not None}
 
 
+FIELD_MIRRORS = {"budget_min_aed": "budget_min", "budget_max_aed": "budget_max", "property_types": "property_type"}
+
+
 def merge_updates(existing: Row, incoming: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Never overwrite with null; CRM owns contact fields; buyer-confirmed facts win."""
-    buyer_fields = set((existing.get("buyer_confirmed_fields") or []))
+    """Never overwrite with null; CRM owns contact fields; buyer-confirmed and broker-edited facts win."""
+    buyer_fields = set(existing.get("buyer_confirmed_fields") or []) | set(existing.get("broker_edited_fields") or [])
+    buyer_fields |= {mirror for canonical, mirror in FIELD_MIRRORS.items() if canonical in buyer_fields}
     updates: dict[str, Any] = {}
     for key, value in incoming.items():
         if value in (None, "", [], {}):
@@ -231,17 +240,19 @@ async def _log_changes(lead_id: str, before: Row, updates: dict[str, Any], works
 
 async def enrich(lead: CanonicalLead, merge: MergeResult, workspace_id: str) -> None:
     sources = table("lead_sources", workspace_id)
-    await sources.insert(
-        {
-            "id": new_id(),
-            "lead_id": merge.lead_id,
-            "raw_record_id": None,
-            "source": lead.source,
-            "external_id": lead.external_id,
-            "listing_ref": lead.listing_ref,
-            "first_seen_at": now_iso(),
-        }
-    )
+    already = lead.external_id and await sources.get(lead_id=merge.lead_id, source=lead.source, external_id=lead.external_id)
+    if not already:
+        await sources.insert(
+            {
+                "id": new_id(),
+                "lead_id": merge.lead_id,
+                "raw_record_id": None,
+                "source": lead.source,
+                "external_id": lead.external_id,
+                "listing_ref": lead.listing_ref,
+                "first_seen_at": now_iso(),
+            }
+        )
     if lead.listing_ref:
         prop = await table("properties", workspace_id).get(source_ref=lead.listing_ref) or await table("properties", workspace_id).get(id=lead.listing_ref)
         if prop:
@@ -271,7 +282,24 @@ async def _to_review(record: Row, workspace_id: str, reason: str, fix: dict[str,
 
 async def _suppression(workspace_id: str) -> set[str]:
     rows = await table("suppression_list", workspace_id).select(limit=10_000)
-    return {r["value"] for r in rows if r.get("value")}
+    out: set[str] = set()
+    for r in rows:
+        if r.get("phone"):
+            out.add(clean_phone(str(r["phone"])) or str(r["phone"]))
+        if r.get("email"):
+            out.add(str(r["email"]).strip().lower())
+    return out
+
+
+async def suppress_contact(workspace_id: str, *, phone: str | None, email: str | None, reason: str) -> None:
+    """Add a buyer's contact points to the suppression list (idempotent)."""
+    sup = table("suppression_list", workspace_id)
+    email = email.strip().lower() if email else None
+    phone = (clean_phone(phone) or phone.strip()) if phone else None
+    if phone and not await sup.get(phone=phone):
+        await sup.insert({"id": new_id(), "phone": phone, "email": None, "reason": reason, "created_at": now_iso()})
+    if email and not await sup.get(email=email):
+        await sup.insert({"id": new_id(), "phone": None, "email": email, "reason": reason, "created_at": now_iso()})
 
 
 async def resolve_review(item_id: str, *, workspace_id: str, fixed_payload: dict[str, Any] | None, action: str, user_id: str | None) -> PipelineOutcome | None:

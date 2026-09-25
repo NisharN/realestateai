@@ -81,6 +81,7 @@ class MergeResult(BaseModel):
     created: bool
     matched_by: Literal["phone", "email", "name_recent", "none"]
     needs_review: bool = False
+    suppressed: bool = False
     changed_fields: list[str] = Field(default_factory=list)
 
 

@@ -23,13 +23,13 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
 from app.auth import AuthBackend, RequestContext, get_auth_backend, get_request_context
 from app.database import get_lead_repository
 from app.modules.conversation import templates
-from app.modules.conversation.engine import handle_turn
+from app.modules.conversation.engine import TurnResult, handle_turn
 from app.modules.conversation.repository import ConversationRepo
 from app.modules.voice.speakify import speakify
 from app.services.voice_service import VoiceService
@@ -40,6 +40,10 @@ router = APIRouter()
 HEARTBEAT_S = 20.0
 THINKING_AFTER_S = 1.2
 LOW_CONFIDENCE = 0.6
+MAX_TTS_CHARS = 600
+MAX_TEXT_CHARS = 2000
+MAX_AUDIO_BYTES = 2 * 1024 * 1024  # one utterance (~60 s of 16 kHz mono PCM), not a stream
+MAX_AUDIO_B64_CHARS = MAX_AUDIO_BYTES * 4 // 3 + 4
 YES_WORDS = {"yes", "yeah", "yep", "correct", "right", "نعم", "ايوه", "أيوه", "صح"}
 
 
@@ -63,6 +67,7 @@ class VoiceSession:
         self.voice = voice
         self.current: asyncio.Task[None] | None = None
         self.pending_confirm: str | None = None  # low-confidence transcript awaiting "yes"
+        self.drains: set[asyncio.Task[None]] = set()
 
     async def interrupt(self) -> None:
         task = self.current
@@ -82,6 +87,7 @@ class VoiceSession:
         user_text = ""
         stt_error: str | None = None
         confidence: float | None = None
+        engine: asyncio.Task[TurnResult] | None = None
         try:
             if kind == "audio":
                 audio = base64.b64decode(message.get("data") or "")
@@ -110,32 +116,22 @@ class VoiceSession:
                 return
 
             thinking = asyncio.create_task(self._thinking(turn_id))
-            try:
-                result = await handle_turn(
+            # The engine persists state and may create a handoff, so a barge-in
+            # must never abandon it half-way: shield it and always deliver its result.
+            engine = asyncio.create_task(
+                handle_turn(
                     self.lead_id,
                     user_text,
                     workspace_id=self.workspace_id,
                     channel="voice",
                     idempotency_key=f"voice:{turn_id}",
                 )
+            )
+            try:
+                result = await asyncio.shield(engine)
             finally:
                 thinking.cancel()
-            self.language = result.language or self.language
-            payload: dict[str, Any] = {
-                "type": "reply",
-                "turn_id": turn_id,
-                "user_text": user_text,
-                "reply": result.reply,
-                "spoken_text": speakify(result.reply, self.language),
-                "move": result.move,
-                "stage": result.stage,
-                "score": result.score,
-                "properties": result.cards,
-                "area": result.area,
-                "handoff_id": result.handoff_id,
-                "ended": result.ended,
-                "fallbacks": result.fallbacks,
-            }
+            payload = self._reply_payload(turn_id, user_text, result)
             if kind == "audio" or message.get("want_audio"):
                 wav = await self.voice.text_to_speech(payload["spoken_text"], self.language)
                 if wav:
@@ -144,10 +140,53 @@ class VoiceSession:
             await _send(self.ws, payload)
         except asyncio.CancelledError:
             await _send(self.ws, {"type": "cancelled", "turn_id": turn_id})
+            if engine is not None:
+                drain = asyncio.create_task(self._deliver_committed(turn_id, user_text, engine))
+                self.drains.add(drain)
+                drain.add_done_callback(self.drains.discard)
             raise
         except Exception as exc:
             logger.exception("voice turn failed for lead %s: %s", self.lead_id, exc)
             await self._reply_template(turn_id, "error_fallback", user_text, fallbacks=["template:exception"])
+
+    async def _deliver_committed(self, turn_id: str, user_text: str, engine: asyncio.Task[TurnResult]) -> None:
+        """After a barge-in the engine still finishes; its persisted outcome
+        (state, handoff) is delivered as a text-only reply rather than hidden."""
+        try:
+            result = await asyncio.shield(engine)
+        except asyncio.CancelledError:
+            # Socket closed; the engine keeps running so the turn is never
+            # left half-persisted, and the outcome is replayed on resume.
+            raise
+        except Exception as exc:
+            logger.warning("voice engine failed after interrupt for lead %s: %s", self.lead_id, exc)
+            return
+        payload = self._reply_payload(turn_id, user_text, result)
+        payload["interrupted"] = True
+        await _send(self.ws, payload)
+
+    async def close(self) -> None:
+        await self.interrupt()
+        for task in self.drains:
+            task.cancel()
+
+    def _reply_payload(self, turn_id: str, user_text: str, result: TurnResult) -> dict[str, Any]:
+        self.language = result.language or self.language
+        return {
+            "type": "reply",
+            "turn_id": turn_id,
+            "user_text": user_text,
+            "reply": result.reply,
+            "spoken_text": speakify(result.reply, self.language),
+            "move": result.move,
+            "stage": result.stage,
+            "score": result.score,
+            "properties": result.cards,
+            "area": result.area,
+            "handoff_id": result.handoff_id,
+            "ended": result.ended,
+            "fallbacks": result.fallbacks,
+        }
 
     async def _thinking(self, turn_id: str) -> None:
         await asyncio.sleep(THINKING_AFTER_S)
@@ -227,6 +266,10 @@ async def voice_conversation(
                     await _send(websocket, {"type": "pong"})
             elif kind == "interrupt":
                 await session.interrupt()
+            elif kind == "audio" and len(message.get("data") or "") > MAX_AUDIO_B64_CHARS:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "audio_too_large", "recoverable": True, "max_bytes": MAX_AUDIO_BYTES})
+            elif kind == "text" and len(message.get("text") or "") > MAX_TEXT_CHARS:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "text_too_long", "recoverable": True, "max_chars": MAX_TEXT_CHARS})
             elif kind in {"audio", "text"}:
                 await session.interrupt()  # a new utterance always wins over an in-flight reply
                 session.start_turn(message)
@@ -238,11 +281,15 @@ async def voice_conversation(
         logger.error("voice websocket error: %s", exc)
     finally:
         hb.cancel()
-        await session.interrupt()
+        await session.close()
 
 
 @router.post("/synthesize")
-async def synthesize_speech(text: str, language: str = "en", context: RequestContext = Depends(get_request_context)):
+async def synthesize_speech(
+    text: str = Query(..., min_length=1, max_length=MAX_TTS_CHARS),
+    language: str = Query("en", max_length=8),
+    context: RequestContext = Depends(get_request_context),
+):
     audio = await VoiceService().text_to_speech(speakify(text, language), language)
     if audio is None:
         return Response(status_code=204, headers={"X-TTS-Fallback": "browser"})
