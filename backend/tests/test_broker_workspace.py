@@ -273,3 +273,53 @@ def test_viewings_api_lifecycle_and_stage_sync():
     assert client.get("/api/v1/broker/today").json()["counts"]["viewings"] == 0
     assert client.patch("/api/v1/broker/viewings/missing", json={"status": "done"}).status_code == 404
     assert client.post("/api/v1/broker/viewings", json={"lead_id": "missing", "starts_at": starts}).status_code == 404
+
+
+def test_confirming_an_existing_requested_slot_promotes_it():
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    lead, h = loop.run_until_complete(_handoff())
+    starts = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    requested = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "property_id": "prop-1", "starts_at": starts, "confirmed": False}).json()
+    booked = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "property_id": "prop-1", "starts_at": starts}).json()
+    assert booked["id"] == requested["id"] and booked["status"] == "confirmed"
+    detail = client.get(f"/api/v1/broker/leads/{lead['id']}").json()
+    assert detail["lead"]["stage"] == "viewing_booked"
+    assert any(t.get("type") == "viewing.confirmed" for t in detail["timeline"])
+
+
+def test_viewing_patch_follows_lead_assignment_and_locks_agent_broker():
+    import asyncio
+
+    from app.auth import RequestContext, WorkspaceRole, get_request_context
+
+    loop = asyncio.get_event_loop()
+    lead, h = loop.run_until_complete(_handoff())  # assigned to broker-2
+    starts = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    v = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "starts_at": starts, "confirmed": False}).json()
+    unassigned = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "starts_at": starts, "property_id": "prop-9", "broker_id": None, "confirmed": False}).json()
+    loop.run_until_complete(table("viewings", WS).update({"broker_id": None}, id=unassigned["id"]))
+
+    def as_agent(broker_id: str):
+        async def ctx():
+            return RequestContext(user_id="u", workspace_id=WS, role=WorkspaceRole.AGENT, broker_id=broker_id)
+        return ctx
+
+    try:
+        app.dependency_overrides[get_request_context] = as_agent("broker-1")
+        # Another agent: neither the assigned viewing nor the unassigned one on this lead is reachable.
+        assert client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"status": "cancelled"}).status_code == 404
+        assert client.patch(f"/api/v1/broker/viewings/{unassigned['id']}", json={"status": "confirmed"}).status_code == 404
+
+        app.dependency_overrides[get_request_context] = as_agent("broker-2")
+        moved = client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"broker_id": "broker-1", "notes": "x"})
+        assert moved.status_code == 200 and moved.json()["broker_id"] == "broker-2"
+        claimed = client.patch(f"/api/v1/broker/viewings/{unassigned['id']}", json={"status": "confirmed"})
+        assert claimed.status_code == 200 and claimed.json()["broker_id"] == "broker-2"
+
+        # Reassigning the lead revokes the former agent's access.
+        loop.run_until_complete(get_lead_repository(WS).update(lead["id"], {"assigned_broker": "broker-1"}))
+        assert client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"status": "cancelled"}).status_code == 404
+    finally:
+        app.dependency_overrides.clear()

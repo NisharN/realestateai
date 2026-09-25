@@ -60,6 +60,11 @@ async def request_viewing(
     existing = await viewings.select(lead_id=lead_id, status__in=["requested", "confirmed"], limit=20)
     for row in existing:
         if row.get("property_id") == property_id and row.get("starts_at") == when:
+            if status == "confirmed" and row["status"] == "requested":
+                confirmed = await update_viewing(
+                    workspace_id, row["id"], status="confirmed", broker_id=broker_id, notes=notes, actor=source
+                )
+                return confirmed or row
             return row
     row = {
         "id": new_id(),

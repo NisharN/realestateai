@@ -32,6 +32,7 @@ async def load_workflow_inputs(workspace_id: Optional[str] = None) -> WorkflowIn
         get_lead_repository,
         get_property_repository,
     )
+    from app.modules.store import table
     from app.seed_data import mock_mandates, mock_viewings
 
     workspace_id = workspace_id or current_workspace_id()
@@ -45,8 +46,15 @@ async def load_workflow_inputs(workspace_id: Optional[str] = None) -> WorkflowIn
     viewings = _read_table(client, "viewings", workspace_id)
     mandates = _read_table(client, "mandates", workspace_id)
     if client is None:
-        viewings = viewings or mock_viewings()
+        viewings = await table("viewings", workspace_id).select(limit=500) or mock_viewings()
         mandates = mandates or mock_mandates()
+
+    by_lead = {str(lead.get("id")): lead for lead in leads}
+    for viewing in viewings:
+        lead = by_lead.get(str(viewing.get("lead_id")))
+        if lead:
+            viewing.setdefault("phone", lead.get("phone"))
+            viewing.setdefault("lead_name", lead.get("name") or lead.get("first_name"))
 
     return leads, viewings, mandates, listings
 

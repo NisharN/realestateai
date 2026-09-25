@@ -242,12 +242,27 @@ async def test_engine_full_flow_persists_and_hands_off():
     assert handoff and handoff["brief"]["profile"]
     assert (await get_lead_repository(WS).get_by_id(lead["id"]))["score"] == results[-1].score
 
+    # Agreeing to a call without picking a listing must not fabricate a viewing.
+    assert await table("viewings", WS).select(lead_id=lead["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_engine_liked_listing_becomes_open_viewing_request_on_handoff():
+    lead = await _lead()
+    await handle_turn(lead["id"], "2 bed apartment in dubai marina", workspace_id=WS)
+    shown = await handle_turn(lead["id"], "budget 2.5 million to buy, cash, within 3 months", workspace_id=WS)
+    target = shown.cards[0]["property_id"]
+    r = await handle_turn(lead["id"], "I like this one, can I view it?", workspace_id=WS, property_id=target)
+    assert r.move == "confirm_handoff"
+    r = await handle_turn(lead["id"], "yes please", workspace_id=WS)
+    assert r.move == "handoff" and r.handoff_id
+
     viewings = await table("viewings", WS).select(lead_id=lead["id"])
     assert len(viewings) == 1
     v = viewings[0]
-    assert v["status"] == "requested" and v["source"] == "buyer" and v["starts_at"]
-    assert v["property_id"] in {c["property_id"] for c in results[1].cards}
-    assert v["broker_id"] == handoff["broker_id"]
+    assert v["status"] == "requested" and v["source"] == "buyer"
+    assert v["property_id"] == target and v["starts_at"] is None
+    assert v["broker_id"] == (await table("handoffs", WS).get(id=r.handoff_id))["broker_id"]
 
 
 @pytest.mark.asyncio

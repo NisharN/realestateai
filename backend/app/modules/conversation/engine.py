@@ -268,7 +268,6 @@ async def _run_tools(
         repo = ConversationRepo(workspace_id)
         transcript = await repo.transcript(state.lead_id)
         slot_text = None
-        slot = None
         if move == Move.HANDOFF:
             slot = next_slots(count=1)[0]
             slot_text = slot.label_en if state.language == "en" else slot.label_ar
@@ -285,18 +284,20 @@ async def _run_tools(
         )
         if "handoff" in results:
             state.handoff_id = results["handoff"].get("id")
-            if slot is not None:
-                liked = [p.property_id for p in state.shortlist if p.reaction == "liked"]
-                shortlist = liked or [p.property_id for p in state.current_shortlist()]
+            # A viewing is only recorded for a listing the buyer explicitly liked; the
+            # time stays open (broker confirms it on the call) so no slot is invented.
+            liked = [p.property_id for p in state.shortlist if p.reaction == "liked"]
+            if move == Move.HANDOFF and liked:
                 await guarded(
                     "viewing",
                     request_viewing(
                         workspace_id,
                         lead_id=state.lead_id,
-                        property_id=shortlist[0] if shortlist else None,
-                        starts_at=slot.starts_at,
+                        property_id=liked[-1],
+                        starts_at=None,
                         broker_id=results["handoff"].get("broker_id"),
                         source="buyer",
+                        notes=f"Suggested on call: {slot_text}" if slot_text else None,
                     ),
                 )
     return results
