@@ -105,3 +105,22 @@ def test_silent_wav_is_valid_pcm():
     wav = VoiceService.silent_wav(0.1, 16000)
     assert wav[:4] == b"RIFF" and wav[8:12] == b"WAVE"
     assert int.from_bytes(wav[40:44], "little") == 3200
+
+
+@pytest.mark.asyncio
+async def test_groq_confidence_from_segments():
+    from pydantic import BaseModel
+
+    class Verbose(BaseModel):
+        text: str
+        segments: list[dict]
+
+    resp = Verbose(text="Dubai Marina", segments=[{"avg_logprob": -0.2}, {"avg_logprob": -0.4}])
+    create = AsyncMock(return_value=resp)
+    groq = SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create)))
+    service = _service(groq=groq, hf=SimpleNamespace(automatic_speech_recognition=AsyncMock()))
+
+    result = await service.transcribe(b"audio", "en")
+
+    assert result.confidence == pytest.approx(0.7)
+    assert create.await_args.kwargs["response_format"] == "verbose_json"
