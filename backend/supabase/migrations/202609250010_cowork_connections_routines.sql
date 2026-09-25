@@ -30,6 +30,7 @@ create table if not exists public.cowork_routines (
   steps jsonb not null default '[]'::jsonb,
   enabled boolean not null default true,
   template_id text,
+  broker_id uuid,
   run_count integer not null default 0,
   last_run_at timestamptz,
   last_status text check (last_status in ('success','partial','failed')),

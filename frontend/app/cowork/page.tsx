@@ -20,6 +20,7 @@ import { CrmTab } from "@/features/cowork/crm-tab";
 import { IngestionTools, Notices, useSay, type IngestionTab } from "@/features/cowork/ingestion-tools";
 import { JobsTab } from "@/features/cowork/jobs-tab";
 import { RoutinesTab } from "@/features/cowork/routines-tab";
+import { useBrokerScope } from "@/lib/use-broker-scope";
 
 const TABS = [
   ["connections", "Connections", Cable],
@@ -74,6 +75,7 @@ function Cowork() {
   const dataTab: IngestionTab = INGESTION_TABS.includes(sub as IngestionTab) ? (sub as IngestionTab) : "csv";
   const { say, message, error } = useSay();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { isAgent } = useBrokerScope();
   const inAdvanced = ADVANCED.some(([k]) => k === tab);
 
   const setTab = (next: Tab, subTab?: IngestionTab) => {
@@ -99,6 +101,7 @@ function Cowork() {
             </button>
           ))}
         </div>
+        {!isAgent && (
         <div className="relative ms-auto">
           <button
             type="button"
@@ -126,6 +129,7 @@ function Cowork() {
             </ul>
           )}
         </div>
+        )}
       </div>
 
       <Notices message={message} error={error} />

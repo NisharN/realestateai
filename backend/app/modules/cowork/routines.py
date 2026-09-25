@@ -189,16 +189,22 @@ def public_view(row: Row) -> Row:
     return {**row, "schedule_label": describe_schedule(row.get("schedule") or {})}
 
 
-async def list_routines(workspace_id: str) -> list[Row]:
+async def list_routines(workspace_id: str, *, broker_id: str | None = None) -> list[Row]:
+    """``broker_id`` restricts to that broker's own routines (agents); ``None`` lists the whole workspace."""
     rows = await table(TABLE, workspace_id).select(order="created_at", desc=True, limit=200)
+    if broker_id is not None:
+        rows = [r for r in rows if r.get("broker_id") == broker_id]
     return [public_view(r) for r in rows]
 
 
-async def get_routine(workspace_id: str, routine_id: str) -> Row | None:
-    return await table(TABLE, workspace_id).get(id=routine_id)
+async def get_routine(workspace_id: str, routine_id: str, *, broker_id: str | None = None) -> Row | None:
+    row = await table(TABLE, workspace_id).get(id=routine_id)
+    if row and broker_id is not None and row.get("broker_id") != broker_id:
+        return None
+    return row
 
 
-async def create_routine(workspace_id: str, body: RoutineIn, *, actor: str | None) -> Row:
+async def create_routine(workspace_id: str, body: RoutineIn, *, actor: str | None, broker_id: str | None = None) -> Row:
     body.schedule.validate_shape()
     steps = await validate_steps(workspace_id, body.steps)
     schedule = body.schedule.model_dump()
@@ -211,6 +217,7 @@ async def create_routine(workspace_id: str, body: RoutineIn, *, actor: str | Non
             "steps": steps,
             "enabled": body.enabled,
             "template_id": body.template_id,
+            "broker_id": broker_id,
             "run_count": 0,
             "last_run_at": None,
             "last_status": None,
@@ -223,9 +230,9 @@ async def create_routine(workspace_id: str, body: RoutineIn, *, actor: str | Non
     return public_view(row)
 
 
-async def patch_routine(workspace_id: str, routine_id: str, body: RoutinePatch) -> Row | None:
+async def patch_routine(workspace_id: str, routine_id: str, body: RoutinePatch, *, broker_id: str | None = None) -> Row | None:
     t = table(TABLE, workspace_id)
-    current = await t.get(id=routine_id)
+    current = await get_routine(workspace_id, routine_id, broker_id=broker_id)
     if not current:
         return None
     updates: Row = {"updated_at": now_iso()}
@@ -247,7 +254,9 @@ async def patch_routine(workspace_id: str, routine_id: str, body: RoutinePatch) 
     return public_view(rows[0]) if rows else None
 
 
-async def delete_routine(workspace_id: str, routine_id: str) -> bool:
+async def delete_routine(workspace_id: str, routine_id: str, *, broker_id: str | None = None) -> bool:
+    if not await get_routine(workspace_id, routine_id, broker_id=broker_id):
+        return False
     await table(RUNS_TABLE, workspace_id).update({"routine_id": None}, routine_id=routine_id)
     return (await table(TABLE, workspace_id).delete(id=routine_id)) > 0
 
@@ -258,11 +267,17 @@ async def due_routines(workspace_id: str, *, now: str | None = None, limit: int 
     return [r for r in rows if r.get("next_run_at") and r["next_run_at"] <= now][:limit]
 
 
-async def list_runs(workspace_id: str, *, routine_id: str | None = None, limit: int = 50) -> list[Row]:
+async def list_runs(workspace_id: str, *, routine_id: str | None = None, limit: int = 50, broker_id: str | None = None) -> list[Row]:
     t = table(RUNS_TABLE, workspace_id)
     if routine_id:
+        if broker_id is not None and not await get_routine(workspace_id, routine_id, broker_id=broker_id):
+            return []
         return await t.select(order="started_at", desc=True, limit=limit, routine_id=routine_id)
-    return await t.select(order="started_at", desc=True, limit=limit)
+    rows = await t.select(order="started_at", desc=True, limit=limit)
+    if broker_id is not None:
+        mine = {r["id"] for r in await list_routines(workspace_id, broker_id=broker_id)}
+        rows = [r for r in rows if r.get("routine_id") in mine]
+    return rows
 
 
 # --------------------------------------------------------------------------- execution
@@ -272,6 +287,7 @@ class RunContext:
     def __init__(self, workspace_id: str, routine: Row) -> None:
         self.workspace_id = workspace_id
         self.routine = routine
+        self.broker_id: str | None = routine.get("broker_id")
         self.leads: list[Row] = []
         self.viewings: list[Row] = []
         self.issues: list[dict[str, Any]] = []
@@ -309,6 +325,8 @@ async def _select_leads(ctx: RunContext, params: dict[str, Any]) -> dict[str, An
     wanted_ids = {str(x) for x in (params.get("lead_ids") or []) if x}
     out: list[Row] = []
     for lead in rows:
+        if ctx.broker_id and lead.get("assigned_broker") != ctx.broker_id:
+            continue
         if wanted_ids and str(lead.get("id")) not in wanted_ids:
             continue
         if params.get("stage") and lead_stage(lead) != params["stage"]:
@@ -343,6 +361,8 @@ async def _select_viewings(ctx: RunContext, params: dict[str, Any]) -> dict[str,
     now = datetime.now(timezone.utc)
     out = []
     for v in rows:
+        if ctx.broker_id and v.get("broker_id") != ctx.broker_id:
+            continue
         if v.get("status") not in ("requested", "booked", "confirmed"):
             continue
         starts = v.get("starts_at")
@@ -694,6 +714,8 @@ async def _analytics_query(ctx: RunContext, params: dict[str, Any]) -> dict[str,
         q = parse_question(str(params["question"]), default_limit=int(params.get("limit") or 5))
     else:
         q = AnalyticsQuery(**{k: v for k, v in params.items() if k in AnalyticsQuery.model_fields and v not in (None, "")})
+    if ctx.broker_id:
+        q = q.model_copy(update={"broker_id": ctx.broker_id})
     result = await run_query(q, workspace_id=ctx.workspace_id)
     ids = [r["id"] for r in result.rows if isinstance(r, dict) and r.get("id")]
     if ids:
@@ -812,9 +834,9 @@ async def _execute_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, Any]
     return {"error": f"unknown step {t}"}
 
 
-async def run_routine(workspace_id: str, routine_id: str, *, trigger: str = "manual", actor: str | None = None) -> Row:
+async def run_routine(workspace_id: str, routine_id: str, *, trigger: str = "manual", actor: str | None = None, broker_id: str | None = None) -> Row:
     routines = table(TABLE, workspace_id)
-    routine = await routines.get(id=routine_id)
+    routine = await get_routine(workspace_id, routine_id, broker_id=broker_id)
     if not routine:
         raise LookupError("routine not found")
     runs = table(RUNS_TABLE, workspace_id)
@@ -1064,7 +1086,7 @@ TEMPLATES: list[dict[str, Any]] = [
 ]
 
 
-async def instantiate_template(workspace_id: str, template_id: str, *, actor: str | None) -> Row:
+async def instantiate_template(workspace_id: str, template_id: str, *, actor: str | None, broker_id: str | None = None) -> Row:
     tpl = next((t for t in TEMPLATES if t["id"] == template_id), None)
     if not tpl:
         raise LookupError("template not found")
@@ -1077,7 +1099,7 @@ async def instantiate_template(workspace_id: str, template_id: str, *, actor: st
         for s in tpl["steps"]
     ]
     body = RoutineIn(name=tpl["name"], description=tpl["description"], schedule=Schedule(**tpl["schedule"]), steps=steps, enabled=False, template_id=tpl["id"])
-    return await create_routine(workspace_id, body, actor=actor)
+    return await create_routine(workspace_id, body, actor=actor, broker_id=broker_id)
 
 
 def step_catalog() -> dict[str, Any]:

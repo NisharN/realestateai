@@ -1416,7 +1416,7 @@ export interface AnalyticsLeadRow {
   property_type: string | null;
   source: string | null;
   last_contact_at?: string | null;
-  hours_silent?: number | null;
+  silent_hours?: number | null;
   delta?: number | null;
 }
 

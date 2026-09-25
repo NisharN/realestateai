@@ -164,7 +164,7 @@ function Answer({ result, onAction, busy }: { result: AnalyticsResult; onAction:
                   <span className="text-xs tabular-nums text-muted-foreground">{l.score}</span>
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
-                  {[l.areas?.join(", "), l.purpose, l.budget_max_aed ? `AED ${compact(l.budget_max_aed)}` : null, l.hours_silent != null ? `${Math.round(l.hours_silent / 24)}d quiet` : null]
+                  {[l.areas?.join(", "), l.purpose, l.budget_max_aed ? `AED ${compact(l.budget_max_aed)}` : null, l.silent_hours != null ? `${l.silent_hours >= 48 ? `${Math.round(l.silent_hours / 24)}d` : `${l.silent_hours}h`} quiet` : null]
                     .filter(Boolean)
                     .join(" · ") || l.stage}
                 </p>

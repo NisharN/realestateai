@@ -11,6 +11,7 @@ import { ArrowDownToLine, ArrowUpFromLine, ChevronDown, ChevronRight, Loader2, S
 import { Skeleton } from "@/components/ui/page";
 import { coworkApi, type CoworkJob } from "@/lib/api";
 import { relativeTime } from "@/lib/broker-format";
+import { useBrokerScope } from "@/lib/use-broker-scope";
 import { ConnectionsTab } from "./connections-tab";
 import { ConnectorsTab, type Say } from "./ingestion-tools";
 import { RunStatus, Toggle, humanInterval } from "./shared";
@@ -26,6 +27,7 @@ export function CrmTab({ say }: { say: Say }) {
   const [jobs, setJobs] = useState<CoworkJob[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
+  const { isAgent } = useBrokerScope();
 
   const load = useCallback(async () => {
     const r = await coworkApi.jobs();
@@ -124,6 +126,7 @@ export function CrmTab({ say }: { say: Say }) {
         )}
       </section>
 
+      {!isAgent && (
       <section>
         <button type="button" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground" onClick={() => setAdvanced((a) => !a)} aria-expanded={advanced}>
           {advanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -135,6 +138,7 @@ export function CrmTab({ say }: { say: Say }) {
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

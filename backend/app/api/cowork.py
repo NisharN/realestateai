@@ -28,6 +28,13 @@ def _member(context: RequestContext) -> None:
     context.require_roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.AGENT)
 
 
+def _routine_scope(context: RequestContext) -> str | None:
+    """Agents own routines that only ever touch their assigned leads; owners/admins run workspace-wide."""
+    if context.role == WorkspaceRole.AGENT:
+        return context.broker_id or "__none__"
+    return None
+
+
 @router.get("/overview")
 async def overview(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _admin(context)
@@ -326,14 +333,14 @@ async def routines_catalog(context: RequestContext = Depends(get_request_context
 @router.get("/routines")
 async def list_routines(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
     _member(context)
-    return await routines.list_routines(context.workspace_id)
+    return await routines.list_routines(context.workspace_id, broker_id=_routine_scope(context))
 
 
 @router.post("/routines", status_code=201)
 async def create_routine(body: routines.RoutineIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _member(context)
     try:
-        return await routines.create_routine(context.workspace_id, body, actor=context.user_id)
+        return await routines.create_routine(context.workspace_id, body, actor=context.user_id, broker_id=_routine_scope(context))
     except ValueError as exc:
         raise _bad(exc)
 
@@ -346,7 +353,7 @@ class TemplateIn(BaseModel):
 async def routine_from_template(body: TemplateIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _member(context)
     try:
-        return await routines.instantiate_template(context.workspace_id, body.template_id, actor=context.user_id)
+        return await routines.instantiate_template(context.workspace_id, body.template_id, actor=context.user_id, broker_id=_routine_scope(context))
     except LookupError:
         raise HTTPException(status_code=404, detail="template_not_found")
     except ValueError as exc:
@@ -360,14 +367,14 @@ async def list_routine_runs(
     context: RequestContext = Depends(get_request_context),
 ) -> list[dict[str, Any]]:
     _member(context)
-    return await routines.list_runs(context.workspace_id, routine_id=routine_id, limit=limit)
+    return await routines.list_runs(context.workspace_id, routine_id=routine_id, limit=limit, broker_id=_routine_scope(context))
 
 
 @router.patch("/routines/{routine_id}")
 async def patch_routine(routine_id: str, body: routines.RoutinePatch, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _member(context)
     try:
-        row = await routines.patch_routine(context.workspace_id, routine_id, body)
+        row = await routines.patch_routine(context.workspace_id, routine_id, body, broker_id=_routine_scope(context))
     except ValueError as exc:
         raise _bad(exc)
     if not row:
@@ -378,13 +385,13 @@ async def patch_routine(routine_id: str, body: routines.RoutinePatch, context: R
 @router.delete("/routines/{routine_id}")
 async def delete_routine(routine_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, bool]:
     _member(context)
-    return {"deleted": await routines.delete_routine(context.workspace_id, routine_id)}
+    return {"deleted": await routines.delete_routine(context.workspace_id, routine_id, broker_id=_routine_scope(context))}
 
 
 @router.post("/routines/{routine_id}/run")
 async def run_routine_now(routine_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _member(context)
     try:
-        return await routines.run_routine(context.workspace_id, routine_id, trigger="manual", actor=context.user_id)
+        return await routines.run_routine(context.workspace_id, routine_id, trigger="manual", actor=context.user_id, broker_id=_routine_scope(context))
     except LookupError:
         raise HTTPException(status_code=404, detail="not_found")

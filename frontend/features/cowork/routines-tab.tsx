@@ -193,6 +193,7 @@ export function RoutinesTab({ say }: { say: Say }) {
           routine={editing.routine}
           template={editing.template}
           onClose={() => setEditing(null)}
+          onChanged={() => void load()}
           onSaved={() => {
             setEditing(null);
             void load();
@@ -378,6 +379,7 @@ function Builder({
   template,
   onClose,
   onSaved,
+  onChanged,
   say,
 }: {
   catalog: RoutineCatalog;
@@ -386,6 +388,7 @@ function Builder({
   template?: RoutineTemplate;
   onClose: () => void;
   onSaved: () => void;
+  onChanged: () => void;
   say: Say;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(routine, template, connections));
@@ -393,6 +396,7 @@ function Builder({
   const [picker, setPicker] = useState<"source" | "action" | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [preview, setPreview] = useState<RoutineRun | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
   const specs = useMemo(() => new Map(catalog.steps.map((s) => [s.type, s])), [catalog.steps]);
 
   const update = (i: number, patch: Partial<RoutineStep>) => setDraft((d) => ({ ...d, steps: d.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
@@ -414,7 +418,8 @@ function Builder({
   const save = async (runAfter = false) => {
     setSaving(true);
     const input = toInput();
-    const r = routine ? await coworkApi.patchRoutine(routine.id, input) : await coworkApi.createRoutine(input);
+    const existingId = routine?.id ?? savedId;
+    const r = existingId ? await coworkApi.patchRoutine(existingId, input) : await coworkApi.createRoutine(input);
     if (r.data && runAfter) {
       const run = await coworkApi.runRoutine(r.data.id);
       if (run.data) setPreview(run.data);
@@ -423,7 +428,12 @@ function Builder({
       say(r, routine ? "Routine saved" : "Routine created");
     }
     setSaving(false);
-    if (r.data && !runAfter) onSaved();
+    if (r.data) {
+      if (runAfter) {
+        setSavedId(r.data.id);
+        onChanged();
+      } else onSaved();
+    }
   };
 
   const missingConnection = draft.steps.some((s) => specs.get(s.type)?.needs_connection && !s.connection_id);
