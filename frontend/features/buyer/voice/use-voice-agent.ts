@@ -72,10 +72,10 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
     [setStatusSafe],
   );
 
-  const startListening = useCallback(async (): Promise<boolean> => {
+  const startListening = useCallback(async (keepError = false): Promise<boolean> => {
     const rec = recorderRef.current;
     if (!rec) return false;
-    setError(null);
+    if (!keepError) setError(null);
     setStatusSafe("listening");
     const ok = await rec.start();
     if (!ok) return false;
@@ -94,7 +94,7 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
       onError: (e) => {
         // Reply text is already in the thread; surface why it was not spoken and keep going.
         setError(e);
-        if (handsFreeRef.current && sessionActiveRef.current) void startListening();
+        if (handsFreeRef.current && sessionActiveRef.current) void startListening(true);
         else setStatusSafe("idle");
       },
     });
@@ -189,9 +189,11 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
     async (leadId: string): Promise<boolean> => {
       if (wsRef.current && wsLeadRef.current === leadId) {
         if (readyRef.current) await readyRef.current;
-        return wsRef.current.connected;
+        if (wsRef.current.connected) return true;
       }
+      // No socket, a different lead, or a dead socket (retries exhausted): start a fresh one.
       wsRef.current?.disconnect();
+      wsRef.current = null;
       setStatusSafe("connecting");
       readyRef.current = new Promise<void>((resolve) => {
         readyResolveRef.current = resolve;
