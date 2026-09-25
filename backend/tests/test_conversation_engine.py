@@ -322,3 +322,26 @@ async def test_engine_turn_emits_lead_scored_for_writeback():
     await handle_turn(lead["id"], "2 bed apartment in marina, budget 2.5m to buy", workspace_id=WS)
     evs = await table("lead_events", WS).select(lead_id=lead["id"], type="lead.scored")
     assert evs and "score" in evs[0]["payload"]["changed_fields"]
+
+
+@pytest.mark.asyncio
+async def test_engine_property_id_pins_card_actions_to_that_listing():
+    lead = await _lead()
+    await handle_turn(lead["id"], "2 bed apartment in dubai marina", workspace_id=WS)
+    shown = await handle_turn(lead["id"], "budget 2.5 million to buy", workspace_id=WS)
+    assert len(shown.cards) >= 2
+    target = shown.cards[-1]["property_id"]
+
+    r = await handle_turn(lead["id"], f"Tell me more about {shown.cards[-1]['title']}", workspace_id=WS, property_id=target)
+    assert r.move == "answer_property"
+    assert [c["property_id"] for c in r.compare] == [target]
+
+    r = await handle_turn(lead["id"], f"I like {shown.cards[-1]['title']}", workspace_id=WS, property_id=target)
+    state = await ConversationRepo(WS).load(lead["id"])
+    liked = [p.property_id for p in state.shortlist if p.reaction == "liked"]
+    assert liked == [target]
+
+    r = await handle_turn(lead["id"], "I like this one", workspace_id=WS, property_id="not-a-shown-property")
+    assert r.reply
+    state = await ConversationRepo(WS).load(lead["id"])
+    assert [p.property_id for p in state.shortlist if p.reaction == "liked"] == [target]

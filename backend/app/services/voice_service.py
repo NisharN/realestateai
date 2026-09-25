@@ -80,6 +80,8 @@ class VoiceService:
     async def transcribe(self, audio_bytes: bytes, language: str = "en") -> Transcript:
         if not audio_bytes:
             return Transcript(text="", provider=None, error="empty audio")
+        if self.settings.FAULT_STT:
+            return Transcript(text="", provider=None, error="fault injection: FAULT_STT")
         timeout = self.settings.STT_TIMEOUT_S
         last_error: str | None = None
 
@@ -151,7 +153,7 @@ class VoiceService:
 
         Callers must treat ``None`` as "use browser speech synthesis".
         """
-        if not text:
+        if not text or self.settings.FAULT_TTS:
             return None
         model_path = self._piper_model(language)
         if model_path is None:

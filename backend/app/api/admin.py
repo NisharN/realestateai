@@ -12,6 +12,7 @@ from app.auth import RequestContext, WorkspaceRole, get_request_context
 from app.modules.ingestion.connectors.crm_pull import PULL_TYPES, poll_connector, validate_crm_url
 from app.modules.ingestion.field_maps import save_field_map, suggest_field_map
 from app.modules.ingestion.pipeline.processor import process_many, resolve_review, retry_errors
+from app.modules.privacy.service import erase_lead, export_lead, list_requests, record_consent, retention_purge
 from app.modules.store import now_iso, table
 
 router = APIRouter()
@@ -244,6 +245,54 @@ async def retry_pipeline_errors(context: RequestContext = Depends(get_request_co
     _admin(context)
     outcomes = await retry_errors(context.workspace_id)
     return {"retried": len(outcomes), "published": sum(1 for o in outcomes if o.status == "published")}
+
+
+class ConsentBody(BaseModel):
+    purpose: Literal["contact", "marketing", "processing"]
+    granted: bool
+    channel: str = "admin"
+    source: str = "admin_ui"
+
+
+@router.get("/privacy/requests")
+async def privacy_requests(context: RequestContext = Depends(get_request_context)):
+    _admin(context)
+    return {"requests": await list_requests(context.workspace_id)}
+
+
+@router.get("/privacy/leads/{lead_id}/export")
+async def privacy_export(lead_id: str, context: RequestContext = Depends(get_request_context)):
+    """PDPL right of access: everything held about one buyer, as JSON."""
+    _admin(context)
+    bundle = await export_lead(lead_id, context.workspace_id, requested_by=context.user_id)
+    if bundle is None:
+        raise HTTPException(404, detail={"code": "lead_not_found", "message": "Lead not found"})
+    return bundle
+
+
+@router.delete("/privacy/leads/{lead_id}")
+async def privacy_erase(lead_id: str, context: RequestContext = Depends(get_request_context)):
+    """PDPL right to erasure: irreversible; contact points are suppressed afterwards."""
+    _admin(context)
+    result = await erase_lead(lead_id, context.workspace_id, requested_by=context.user_id)
+    if result is None:
+        raise HTTPException(404, detail={"code": "lead_not_found", "message": "Lead not found"})
+    return result
+
+
+@router.post("/privacy/leads/{lead_id}/consent")
+async def privacy_consent(lead_id: str, body: ConsentBody, context: RequestContext = Depends(get_request_context)):
+    _admin(context)
+    lead = await record_consent(lead_id, context.workspace_id, purpose=body.purpose, granted=body.granted, channel=body.channel, source=body.source)
+    if lead is None:
+        raise HTTPException(404, detail={"code": "lead_not_found", "message": "Lead not found"})
+    return {"lead_id": lead_id, "consent": lead.get("consent")}
+
+
+@router.post("/privacy/retention/run")
+async def privacy_retention_run(context: RequestContext = Depends(get_request_context)):
+    _admin(context)
+    return await retention_purge(context.workspace_id)
 
 
 @router.get("/data-health")

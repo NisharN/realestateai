@@ -83,3 +83,226 @@
       move: handoff_now
     - say: "any villas in jumeirah?"
       move: after_handoff
+# ---------------------------------------------------------------- objections
+- id: objection_price_after_shortlist
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "that's too expensive for me"
+      move: handle_objection
+- id: objection_location_after_shortlist
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "too far from my office, different area please"
+      move: handle_objection
+- id: objection_size_after_shortlist
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+      cards_min: 1
+    - say: "these are too small, I need more space"
+      move: handle_objection
+- id: objection_payment_plan
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "do any of these have a payment plan?"
+      move: handle_objection
+- id: objection_handover
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "when is the handover? I need ready to move"
+      move: answer_property
+- id: objection_before_shortlist_is_not_objection
+  turns:
+    - say: "everything in dubai is too expensive, but I want to buy a 1 bed"
+      move: ask_next_field
+      slots: {purpose: buy}
+# ------------------------------------------------------------- rude / abuse
+- id: rude_message_gets_calm_redirect
+  turns:
+    - say: "hello"
+      move: greeting
+    - say: "you are a useless stupid bot"
+      move: ask_next_field
+      reply_excludes: ["stupid", "useless"]
+- id: rude_then_recovers
+  turns:
+    - say: "this is rubbish"
+    - say: "fine. buy a villa in arabian ranches, 5 million"
+      move: suggest
+      slots: {purpose: buy, "budget.max_aed": 5000000}
+- id: two_misunderstandings_hand_off
+  turns:
+    - say: "hello"
+      move: greeting
+    - say: "asdkjh qwe zxc"
+    - say: "blorp flim flam"
+      move: handoff_now
+      handoff: true
+    - say: "gnarf"
+      move: after_handoff
+# ------------------------------------------------------------ not interested
+- id: not_interested_nurtures
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "actually I'm not interested anymore"
+      move: nurture
+      handoff: false
+- id: already_bought_nurtures
+  turns:
+    - say: "I already bought somewhere else, thanks"
+      move: nurture
+- id: long_timeline_nurtures
+  turns:
+    - say: "buy 2 bed apartment dubai marina, budget 2.5m, maybe next year or later"
+      move: nurture
+# -------------------------------------------------------------- area questions
+- id: area_schools_question
+  turns:
+    - say: "are there schools in dubai hills?"
+      move: answer_area
+- id: area_metro_question
+  turns:
+    - say: "is there a metro near JVC?"
+      move: answer_area
+- id: area_travel_downtown_to_marina
+  turns:
+    - say: "how far is downtown from dubai marina?"
+      move: answer_area
+      reply_excludes: ["exactly"]
+- id: area_question_unknown_origin_answers_known_side
+  turns:
+    - say: "how far is Narnia from downtown?"
+      move: answer_area
+      reply_excludes: ["Narnia"]
+- id: area_question_arabic
+  turns:
+    - say: "كم تبعد مرسى دبي عن داون تاون؟"
+      language: ar
+      move: answer_area
+# --------------------------------------------------------------- arabic / mixed
+- id: arabic_stop_wins
+  turns:
+    - say: "أبحث عن فيلا في المرابع العربية"
+      language: ar
+    - say: "توقف"
+      move: opt_out
+      ended: true
+- id: arabic_human_request
+  turns:
+    - say: "أريد التحدث مع موظف"
+      language: ar
+      move: handoff_now
+      handoff: true
+- id: arabic_rent_flow
+  turns:
+    - say: "أريد استئجار شقة غرفة واحدة في قرية جميرا الدائرية"
+      language: ar
+      move: ask_next_field
+      slots: {purpose: rent}
+    - say: "120 ألف سنوياً"
+      language: ar
+      move: suggest
+- id: arabic_greeting_then_english
+  turns:
+    - say: "مرحبا"
+      language: ar
+      move: greeting
+    - say: "I want to buy a 2 bed apartment in dubai marina, 2.5m"
+      language: en
+      move: suggest
+- id: mixed_arabizi_budget
+  turns:
+    - say: "ana abhath an shaqa 2 bed apartment in marina to buy"
+      move: ask_next_field
+      slots: {purpose: buy}
+    - say: "2.5 مليون"
+      move: suggest
+      slots: {"budget.max_aed": 2500000}
+- id: mixed_english_with_arabic_area
+  turns:
+    - say: "buy 3 bed villa في دبي هيلز, 6 million"
+      move: suggest
+      slots: {purpose: buy}
+# --------------------------------------------------------------- budgets
+- id: budget_lakh_style_clarifies
+  turns:
+    - say: "buy apartment marina"
+    - say: "1.5"
+      move: clarify_budget
+- id: budget_range_uses_max
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "between 2 and 2.5 million"
+      move: suggest
+      slots: {"budget.max_aed": 2500000}
+- id: budget_monthly_rent_normalised
+  turns:
+    - say: "rent 1 bed apartment jvc"
+    - say: "10k per month"
+      move: suggest
+      slots: {"budget.max_aed": 120000}
+- id: budget_words_million
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "two point five million dirhams"
+      move: suggest
+# --------------------------------------------------------------- handoff paths
+- id: viewing_request_confirms_first
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "can I book a viewing for the first one?"
+      move: confirm_handoff
+      handoff: false
+    - say: "yes"
+      move: handoff
+      handoff: true
+- id: liked_property_offers_specialist
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "I love the first one"
+      move: confirm_handoff
+- id: declined_handoff_refines
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "I like the first one"
+      move: confirm_handoff
+    - say: "no, show me other options"
+      move: suggest
+      handoff: false
+- id: call_me_is_human_request
+  turns:
+    - say: "just call me"
+      move: handoff_now
+      handoff: true
+- id: are_you_a_bot_is_not_handoff
+  turns:
+    - say: "are you a bot?"
+      handoff: false
+- id: no_guarantees_in_reply
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+      reply_excludes: ["guaranteed", "best price", "risk-free"]
+- id: no_invented_prices_when_no_inventory
+  turns:
+    - say: "buy a 6 bed villa in international city"
+    - say: "budget 300k"
+      move: suggest
+      reply_contains: ["don't have a live listing"]
+      reply_excludes: ["AED 3", "million"]

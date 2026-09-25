@@ -1,5 +1,7 @@
 # Production operations
 
+Step-by-step runbooks: `runbooks/deploy.md`, `runbooks/osrm.md`, `runbooks/piper.md`.
+
 Deploy the frontend to Vercel and create three Railway services from `backend`: web, worker, and beat. Each environment uses a separate Supabase project, Redis instance, Stripe webhook endpoint, Meta application, and provider credentials.
 
 ## Migration procedure
