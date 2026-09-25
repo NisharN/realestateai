@@ -293,15 +293,23 @@ async def patch_viewing(viewing_id: str, body: ViewingUpdate, context: RequestCo
     row = await table("viewings", ws).get(id=viewing_id)
     if not row:
         raise HTTPException(404, detail={"code": "viewing_not_found", "message": "Viewing not found"})
-    if context.role == WorkspaceRole.AGENT and row.get("broker_id") not in (None, context.broker_id):
+    # Access follows the lead's current assignment, not the broker recorded on the
+    # viewing, so a reassigned lead's former agent loses access and agents can never
+    # move a viewing into another broker's queue.
+    lead = await get_lead_repository(ws).get_by_id(row["lead_id"])
+    if not lead or not _visible(context, lead):
         raise HTTPException(404, detail={"code": "viewing_not_found", "message": "Viewing not found"})
+    if context.role == WorkspaceRole.AGENT:
+        broker_id = context.broker_id if row.get("broker_id") != context.broker_id else None
+    else:
+        broker_id = body.broker_id
     try:
         saved = await viewings.update_viewing(
             ws,
             viewing_id,
             status=body.status,
             starts_at=body.starts_at,
-            broker_id=context.broker_id if context.role == WorkspaceRole.AGENT and body.broker_id is None and row.get("broker_id") is None else body.broker_id,
+            broker_id=broker_id,
             notes=body.notes,
             actor=context.user_id,
         )

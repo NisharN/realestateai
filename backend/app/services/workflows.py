@@ -186,7 +186,7 @@ def evaluate_viewing_reminders(
     for viewing in viewings:
         if viewing.get("reminder_sent_at") or viewing.get("status") == "cancelled":
             continue
-        scheduled = _parse_dt(viewing.get("scheduled_at"))
+        scheduled = _parse_dt(viewing.get("starts_at") or viewing.get("scheduled_at"))
         if scheduled is None or not (now <= scheduled <= window_end):
             continue
 
@@ -318,9 +318,9 @@ def evaluate_post_viewing_nudge(
     actions: List[WorkflowAction] = []
 
     for viewing in viewings:
-        if viewing.get("followup_sent_at") or viewing.get("status") != "completed":
+        if viewing.get("followup_sent_at") or viewing.get("status") not in {"completed", "done"}:
             continue
-        scheduled = _parse_dt(viewing.get("scheduled_at"))
+        scheduled = _parse_dt(viewing.get("starts_at") or viewing.get("scheduled_at"))
         if scheduled is None or now < scheduled + timedelta(hours=18):
             continue
 

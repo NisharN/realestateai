@@ -14,7 +14,6 @@ import redis.asyncio as aioredis
 from app.config import get_settings
 from app.database import DatabaseClient, _use_mock_store
 from app.modules.llm.gateway import get_gateway
-from app.modules.store import table
 
 PROBE_TIMEOUT_S = 2.0
 
@@ -36,8 +35,17 @@ async def _database(workspace_id: str) -> dict[str, Any]:
         return {"status": "ok", "mode": "memory"}
     if DatabaseClient.get_client() is None:
         return {"status": "down", "mode": "supabase", "error": "client_init_failed"}
-    await table("workspaces", workspace_id).select(limit=1)
+    # The Supabase SDK is synchronous; run it off the event loop so the probe
+    # timeout can fire and other requests keep being served while it stalls.
+    await asyncio.to_thread(_sync_workspace_probe, workspace_id)
     return {"status": "ok", "mode": "supabase"}
+
+
+def _sync_workspace_probe(workspace_id: str) -> None:
+    client = DatabaseClient.get_client()
+    if client is None:
+        raise RuntimeError("client_init_failed")
+    client.table("workspaces").select("id").eq("id", workspace_id).limit(1).execute()
 
 
 async def _redis() -> dict[str, Any]:

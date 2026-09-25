@@ -135,6 +135,12 @@ class TestViewingReminders:
         viewing = self._viewing(6, status="cancelled")
         assert wf.evaluate_viewing_reminders([viewing], NOW, SETTINGS) == []
 
+    def test_persisted_viewing_rows_use_starts_at_and_done(self):
+        upcoming = self._viewing(6, scheduled_at=None, starts_at=(NOW + timedelta(hours=6)).isoformat(), status="confirmed")
+        assert len(wf.evaluate_viewing_reminders([upcoming], NOW, SETTINGS)) == 1
+        done = self._viewing(-30, scheduled_at=None, starts_at=(NOW - timedelta(hours=30)).isoformat(), status="done")
+        assert len(wf.evaluate_post_viewing_nudge([done], NOW, SETTINGS)) == 1
+
 
 class TestVoiceGate:
     def _action(self):
