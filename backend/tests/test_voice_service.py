@@ -19,6 +19,8 @@ def _service(groq=None, hf=None, timeout=1.0) -> VoiceService:
         PIPER_VOICE_AR="ar_JO-kareem-medium",
         FAULT_STT=False,
         FAULT_TTS=False,
+        VOICE_STT_PROVIDER="auto",
+        VOICE_TTS_PROVIDER="auto",
     )
     service.piper_binary = None
     service.piper_path = "/nonexistent"
