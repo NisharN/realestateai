@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -85,7 +86,7 @@ async def handle_turn(
     deadline = Deadline(total_budget)
     started = time.monotonic()
     repo = ConversationRepo(workspace_id)
-    key = idempotency_key or f"{lead_id}:{int(time.time() * 1000)}"
+    key = idempotency_key or f"{lead_id}:{uuid4().hex}"
 
     async with lock_for(f"turn:{workspace_id}:{lead_id}"):
         replay = await repo.find_message(lead_id, key)
