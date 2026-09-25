@@ -131,6 +131,9 @@ class LLMGateway:
         deadline = time.monotonic() + budget
         last_error: str | None = None
 
+        if self.settings.FAULT_LLM_ALL:
+            raise LLMUnavailable("fault injection: FAULT_LLM_ALL")
+
         for provider in self.providers:
             if not provider.configured():
                 continue

@@ -78,11 +78,37 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 _AR_MONEY = (("مليون", " million "), ("ألف", " thousand "), ("الف", " thousand "), ("درهم", " AED "), ("دراهم", " AED "), ("سنوياً", " per year "), ("سنوي", " per year "), ("في السنة", " per year "), ("شهرياً", " per month "), ("للشراء", " to buy "), ("شراء", " buy "), ("للإيجار", " to rent "), ("إيجار", " rent "))
 
 
+_WORD_NUM = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100, "half": 0.5,
+}
+_SPOKEN_NUMBER = re.compile(
+    r"\b(" + "|".join(_WORD_NUM) + r")(?:\s+point\s+(" + "|".join(k for k in _WORD_NUM if k not in ("half", "hundred")) + r"))?"
+    r"(\s+hundred)?(?:\s+and\s+a\s+half)?(?=\s+(million|mil|thousand|k)\b)",
+    re.I,
+)
+
+
+def _spoken_number(m: re.Match[str]) -> str:
+    value = float(_WORD_NUM[m.group(1).lower()])
+    if m.group(2):
+        value += _WORD_NUM[m.group(2).lower()] / 10
+    if m.group(3):
+        value *= 100
+    if "half" in m.group(0).lower() and m.group(1).lower() != "half":
+        value += 0.5
+    return f"{value:g}"
+
+
 def normalise_money_text(text: str) -> str:
+    """Digits/keywords only — Arabic numerals and money words, and spoken
+    numbers (voice transcripts: "two point five million") become digits."""
     out = text.translate(_AR_DIGITS)
     for ar, en in _AR_MONEY:
         out = out.replace(ar, en)
-    return out
+    out = _SPOKEN_NUMBER.sub(_spoken_number, out)
+    return out.replace(" dirhams", " AED").replace(" dirham", " AED")
 
 
 def _merge_budget(state: ConversationState, facts: ExtractedFacts, text: str) -> None:
@@ -143,14 +169,19 @@ def _merge_budget(state: ConversationState, facts: ExtractedFacts, text: str) ->
 
     if extraction.intent and not state.has("purpose"):
         _set(state, "purpose", extraction.intent, confidence=0.9)
+    # Listings quote rent per year; a monthly figure is annualised (x12) so
+    # matching and the brief compare like with like.
+    months = 12 if extraction.period == "month" else 1
+    min_aed = extraction.amount_min_aed * months if extraction.amount_min_aed is not None else None
+    max_aed = extraction.amount_max_aed * months if extraction.amount_max_aed is not None else None
     _set(
         state,
         "budget",
         {
-            "min_aed": extraction.amount_min_aed,
-            "max_aed": extraction.amount_max_aed,
+            "min_aed": min_aed,
+            "max_aed": max_aed,
             "currency": extraction.currency,
-            "period": extraction.period,
+            "period": "year" if months == 12 else extraction.period,
             "currency_assumed": currency_assumed,
             "text": text.strip()[:120],
         },

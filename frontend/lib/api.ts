@@ -135,8 +135,8 @@ export interface ApiLead {
 }
 
 export const leadsApi = {
-  ingest: (leadData: any) =>
-    fetchApi("/api/v1/leads/ingest", {
+  ingest: (leadData: LeadIngestInput) =>
+    fetchApi<{ lead_id: string }>("/api/v1/leads/ingest", {
       method: "POST",
       body: JSON.stringify(leadData),
     }),
@@ -151,8 +151,8 @@ export const leadsApi = {
 
   getById: (id: string) => fetchApi<ApiLead>(`/api/v1/leads/${id}`),
 
-  sendMessage: (id: string, message: { text: string }) =>
-    fetchApi(`/api/v1/leads/${id}/message`, {
+  sendMessage: (id: string, message: { text: string; property_id?: string }) =>
+    fetchApi<LeadMessageResponse>(`/api/v1/leads/${id}/message`, {
       method: "POST",
       body: JSON.stringify(message),
     }),
@@ -446,6 +446,41 @@ export interface AreaAnswer {
   }[];
 }
 
+export interface LeadIngestInput {
+  source: string;
+  first_name?: string;
+  phone?: string;
+  email?: string;
+  preferred_language?: "en" | "ar";
+  budget_min?: number;
+  budget_max?: number;
+  property_type?: string;
+  area_preference?: string[];
+  timeline?: string;
+  message?: string;
+}
+
+/** Mirrors backend `MessageResponse` (api/leads.py). */
+export interface LeadMessageResponse {
+  lead_id: string;
+  response: string;
+  move: string;
+  stage: string;
+  score: number;
+  band: string;
+  score_reasons: string[];
+  needs_human: boolean;
+  handoff_id: string | null;
+  matched_properties: PropertyCardDto[];
+  area: AreaAnswer | null;
+  compare: Record<string, unknown>[];
+  profile: Record<string, unknown>;
+  ended: boolean;
+  language: "en" | "ar";
+  fallbacks: string[];
+  latency_ms: number;
+}
+
 export interface PropertyCardDto {
   property_id: string;
   title: string;
@@ -475,6 +510,7 @@ export type VoiceServerMessage =
       score?: number;
       properties?: PropertyCardDto[];
       area?: AreaAnswer | null;
+      language?: "en" | "ar";
       handoff_id?: string | null;
       ended?: boolean;
       interrupted?: boolean;

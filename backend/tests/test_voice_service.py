@@ -17,6 +17,8 @@ def _service(groq=None, hf=None, timeout=1.0) -> VoiceService:
         TTS_TIMEOUT_S=timeout,
         PIPER_VOICE_EN="en_US-lessac-medium",
         PIPER_VOICE_AR="ar_JO-kareem-medium",
+        FAULT_STT=False,
+        FAULT_TTS=False,
     )
     service.piper_binary = None
     service.piper_path = "/nonexistent"
