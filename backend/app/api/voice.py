@@ -41,7 +41,7 @@ async def _send(ws: WebSocket, payload: dict) -> bool:
 async def voice_conversation(
     websocket: WebSocket,
     lead_id: str,
-    token: str,
+    token: str = "",
     workspace_id: str = "",
     backend: AuthBackend = Depends(get_auth_backend),
 ):

@@ -180,13 +180,18 @@ def lead_updates_from_state(state: ConversationState) -> dict[str, Any]:
     if state.has("purpose"):
         updates["purpose"] = state.value("purpose")
     if budget:
-        updates["budget_min_aed"] = budget.get("min_aed")
-        updates["budget_max_aed"] = budget.get("max_aed")
+        updates["budget_min_aed"] = updates["budget_min"] = budget.get("min_aed")
+        updates["budget_max_aed"] = updates["budget_max"] = budget.get("max_aed")
         updates["budget_period"] = budget.get("period")
     if state.has("community_ids"):
-        updates["community_ids"] = state.value("community_ids")
+        ids = list(state.value("community_ids") or [])
+        updates["community_ids"] = ids
+        updates["area_preference"] = [
+            c.name_en if (c := get_community(i)) else i for i in ids
+        ]
     if state.has("property_type"):
         updates["property_types"] = [state.value("property_type")]
+        updates["property_type"] = state.value("property_type")
     if state.has("bedrooms"):
         updates["bedrooms_min"] = state.value("bedrooms")
     if state.has("timeline"):
