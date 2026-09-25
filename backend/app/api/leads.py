@@ -184,6 +184,7 @@ class MessageResponse(BaseModel):
     compare: List[dict] = Field(default_factory=list)
     profile: dict
     ended: bool
+    language: str = "en"
     fallbacks: List[str]
     latency_ms: int
 
@@ -204,6 +205,7 @@ def _message_response(lead_id: str, r: TurnResult) -> MessageResponse:
         compare=r.compare,
         profile=r.profile,
         ended=r.ended,
+        language=r.language,
         fallbacks=r.fallbacks,
         latency_ms=r.latency_ms,
     )
