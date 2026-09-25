@@ -51,7 +51,8 @@ DISAGREE_RE = re.compile(r"^\s*(no|nope|not now|not yet|later|لا|ليس الآ
 ASK_AREA_RE = re.compile(
     r"\b(what('s| is) (it|the area|the community|life|living) like|how is (the|that) (area|community)|"
     r"(schools?|metro|beach|traffic|commute|nearby|near by|amenities|hospital|mall|supermarket|gym) (in|near|around|at)|"
-    r"is (it|the area) (safe|quiet|family|good)|how far (is|from)|travel time|distance to)\b|"
+    r"is (it|the area) (safe|quiet|family|good)|how far (is|from)|travel time|distance to|"
+    r"what('s| is| are) the (average |typical )?(price|cost|rent)s? (of|for|in)|average (price|rent)s?|price per (sq ?ft|square foot))\b|"
     r"كيف المنطقة|ما رأيك بالمنطقة|قريب من|كم تبعد|المدارس|المترو",
     re.I,
 )
@@ -90,16 +91,17 @@ TYPE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("land", re.compile(r"\b(plot|land)\b|أرض|قطعة", re.I)),
 ]
 PURPOSE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("rent", re.compile(r"\b(rent(ing|al)?|lease|to let|tenant|per (year|annum|month)|yearly|monthly)\b|إيجار|استئجار|أستأجر|سنوياً|شهرياً", re.I)),
     ("invest", re.compile(r"\b(invest(ment|ing|or)?|roi|rental yield|yield|golden visa|off[- ]?plan for investment)\b|استثمار|عائد|فيزا ذهبية", re.I)),
+    ("rent", re.compile(r"\b(rent(ing|al)?|lease|to let|tenant|per (year|annum|month)|yearly|monthly)\b|إيجار|استئجار|أستأجر|سنوياً|شهرياً", re.I)),
     ("buy", re.compile(r"\b(buy(ing)?|purchase|own(ing)?|mortgage|cash buyer|first home|move in|live in)\b|شراء|أشتري|تملك|أسكن", re.I)),
 ]
 TIMELINE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("asap", re.compile(r"\b(asap|immediately|right away|urgent(ly)?|this (week|month)|as soon as possible|now)\b|فوراً|بأسرع وقت|هذا الشهر|حالاً", re.I)),
+    ("asap", re.compile(r"\b(asap|immediately|right away|right now|urgent(ly)?|this (week|month)|as soon as possible)\b|فوراً|بأسرع وقت|هذا الشهر|حالاً", re.I)),
     ("1_month", re.compile(r"\b(within (a|one|1) month|next month|in (a|one|1) month|4 weeks|few weeks)\b|خلال شهر|الشهر القادم", re.I)),
-    ("3_months", re.compile(r"\b((within |in |next )?(2|3|two|three) months|this quarter|by (summer|winter|ramadan|eid)|couple of months)\b|خلال (شهرين|ثلاثة أشهر|3 أشهر)", re.I)),
+    ("3_months", re.compile(r"\b((within |in |next )?(2|3|two|three) months|this quarter|by (summer|winter|ramadan|eid)|couple of months|soon|shortly)\b|خلال (شهرين|ثلاثة أشهر|3 أشهر)", re.I)),
     ("6_months", re.compile(r"\b((within |in |next )?(4|5|6|four|five|six) months|half a year|(in )?6 months)\b|خلال (ستة|6) أشهر|نصف سنة", re.I)),
-    ("12_months", re.compile(r"\b((within |in |next )?(7|8|9|10|11|12) months|within (a|one|1|this) year|end of (the )?year|by next year)\b|خلال سنة|نهاية السنة", re.I)),
+    ("12_months", re.compile(r"\b((within |in |next )?(7|8|9|10|11|12) months|within (a|one|1|this) year|this year|end of (the )?year|by next year|"
+                              r"flexible|whenever|no (fixed|specific|particular) (date|time(line|frame)?)|not (fixed|decided))\b|خلال سنة|نهاية السنة", re.I)),
     ("later", re.compile(r"\b(next year|in (2|two|3|three) years|no rush|not (in a )?hurry|just (looking|browsing|exploring|researching)|someday|eventually|long term)\b|السنة القادمة|لا يوجد عجلة|مجرد أتصفح|بعد سنتين", re.I)),
 ]
 PAYMENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -110,6 +112,31 @@ PAYMENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 LIKE_RE = re.compile(r"\b(i like|love|nice|looks good|interested in|the (first|second|third|1st|2nd|3rd) (one|option)|number ([123])|option ([123]))\b|أعجبني|يعجبني|جميل|الأول|الثاني|الثالث", re.I)
 REJECT_RE = re.compile(r"\b(don'?t like|not (for me|these|those|this)|none of (these|those|them)|no(ne)? (of )?(these|those)|show me (other|different|more)|something else|next)\b|لا يعجبني|لا تناسبني|شيء آخر|غيرها", re.I)
 ORDINAL = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "الأول": 1, "الثاني": 2, "الثالث": 3}
+GOODBYE_RE = re.compile(
+    r"\b(bye|goodbye|good bye|see you|talk (later|soon)|that'?s all( for now)?|that will be all|thanks,? that'?s (all|it)|nothing else|"
+    r"i'?ll (get back|come back|be in touch)|ttyl|catch you later)\b|مع السلامة|شكراً هذا كل شيء|إلى اللقاء|سأعود لاحقاً",
+    re.I,
+)
+WHY_RE = re.compile(r"\b(why (do |would |does |should )?(you|u|d'?you) (need|ask|want|care)|why (is|does) (that|this) (matter|needed|important)|what('s| is) (that|this) for)\b|لماذا (تسأل|تحتاج)", re.I)
+WHY_FIELD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("budget", re.compile(r"\b(budget|price range|how much (i|we) (can|want to) spend|money)\b|ميزانية|الميزانية", re.I)),
+    ("area", re.compile(r"\b(area|areas|location|community|communities|neighbou?rhood|where)\b|المنطقة|منطقة|الموقع", re.I)),
+    ("timeline", re.compile(r"\b(timeline|time ?frame|when|timing|how soon)\b|متى|التوقيت", re.I)),
+    ("bedrooms", re.compile(r"\b(bedrooms?|beds?|rooms?)\b|غرف|غرفة", re.I)),
+    ("property_type", re.compile(r"\b(property type|type of (property|home)|villa|apartment|townhouse)\b|نوع العقار", re.I)),
+    ("payment", re.compile(r"\b(payment|mortgage|cash|financ(e|ing))\b|الدفع|تمويل|رهن", re.I)),
+    ("purpose", re.compile(r"\b(purpose|buy or rent|buying or renting|invest(ing|ment)?)\b|الغرض|شراء أو إيجار", re.I)),
+)
+AREA_RECO_RE = re.compile(
+    r"\b((what|which) (areas?|communities|neighbou?rhoods?|locations?|places?) ((are|is|would be|give|gives|have|has|offer|offers|get|gets) |do you (recommend|suggest)|should i)|"
+    r"(best|good|top|high(est)?) (areas?|communities|locations?|places?) (for|to|with)|(best|good|high(est)?|strong(est)?) (rental )?(yield|roi|return)s?|"
+    r"where (should|can|would) (i|we) (buy|invest|rent|look)|recommend (me )?(an? |some )?(areas?|communities|locations?))\b|"
+    r"أفضل (المناطق|منطقة)|أي (منطقة|مناطق) (تنصح|أفضل)|عائد (إيجار|ايجار)",
+    re.I,
+)
+BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2}|one|two|three|four|five|six)\s*(\.|!)?\s*$", re.I)
+RANGE_UNIT_RE = re.compile(r"\b\d{1,2}\s*(-|–|to|or)\s*\d{1,2}\s*(months?|weeks?|years?|bed(room)?s?|br|bhk)\b", re.I)
+BEDROOM_RANGE_RE = re.compile(r"\b(\d{1,2})\s*(-|–|to|or)\s*(\d{1,2})\s*(bed(room)?s?|br|bhk)\b", re.I)
 ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
 BUDGET_FOLLOWUP_RE = re.compile(r"\b(million|mil|m|thousand|k|total|purchase|per (year|annum|month)|yearly|annual|to buy|to rent|buy|rent)\b|مليون|ألف|سنوي|شراء|إيجار|اجار", re.I)
 
@@ -147,6 +174,13 @@ def _bedrooms(text: str) -> int | None:
     if "استوديو" in m.group(0):
         return 0
     return None
+
+
+def _strip_spans(text: str, matches: list[re.Match[str] | None]) -> str:
+    for m in matches:
+        if m:
+            text = text[: m.start()] + " " + text[m.end():]
+    return text
 
 
 def _reactions(text: str, state: ConversationState) -> list[Reaction]:
@@ -195,13 +229,32 @@ def extract_rules(text: str, state: ConversationState) -> ExtractedFacts:
     # slots -------------------------------------------------------------
     slots.purpose = _first(PURPOSE_PATTERNS, text)  # type: ignore[assignment]
     slots.property_type = _first(TYPE_PATTERNS, text)
-    slots.bedrooms = _bedrooms(text)
+    if slots.property_type is None and re.search(r"\b\d\s*-?\s*(br|bhk)\b|\bstudio\b", text, re.I):
+        slots.property_type = "apartment"
+    bed_range = BEDROOM_RANGE_RE.search(text)
+    slots.bedrooms = int(bed_range.group(1)) if bed_range else _bedrooms(text)
     slots.timeline = _first(TIMELINE_PATTERNS, text)  # type: ignore[assignment]
     slots.payment = _first(PAYMENT_PATTERNS, text)  # type: ignore[assignment]
+    facts.asks_why = bool(WHY_RE.search(text))
+    if facts.asks_why:
+        facts.why_field = next((f for f, pat in WHY_FIELD_PATTERNS if pat.search(text)), None)
+    facts.wants_area_recommendation = bool(AREA_RECO_RE.search(text)) and not slots.areas
 
-    budget = extract_budget(normalise_money_text(text))
+    bare = BARE_NUMBER_RE.match(text)
+    if bare and state.last_asked_field == "bedrooms" and slots.bedrooms is None:
+        raw = bare.group(1).lower()
+        slots.bedrooms = WORD_NUM.get(raw, int(raw) if raw.isdigit() else None)
+
+    # Money is parsed from the text with bedroom counts and timelines removed,
+    # so "2-3 bedrooms" or "3-6 months" are never read as AED amounts.
+    money_text = _strip_spans(text, [RANGE_UNIT_RE.search(text)])
+    money_text = _strip_spans(money_text, [BEDROOM_RE.search(money_text)])
+    money_text = _strip_spans(money_text, [p.search(money_text) for _, p in TIMELINE_PATTERNS])
+    if slots.bedrooms is not None and bare:
+        money_text = ""
+    budget = extract_budget(normalise_money_text(money_text))
     if budget.amount_max is not None or (state.has("budget_pending") and BUDGET_FOLLOWUP_RE.search(text)):
-        slots.budget_text = text
+        slots.budget_text = money_text
 
     matches = resolve_area(text)
     strong = [m for m in matches if m.confidence >= 0.8]
@@ -218,23 +271,28 @@ def extract_rules(text: str, state: ConversationState) -> ExtractedFacts:
 
     # intent ------------------------------------------------------------
     objection = _first(OBJECTION_PATTERNS, text)
-    if NOT_INTERESTED_RE.search(text):
+    has_slots = any(
+        v not in (None, [], "") for v in (slots.purpose, slots.property_type, slots.bedrooms, slots.timeline, slots.payment, slots.budget_text, slots.areas)
+    )
+    if GOODBYE_RE.search(text) and not has_slots and not facts.reactions:
+        facts.intent = "goodbye"
+    elif NOT_INTERESTED_RE.search(text):
         facts.intent = "not_interested"
     elif VIEWING_RE.search(text):
         facts.intent = "request_viewing"
     elif COMPARE_RE.search(text) and len(state.shortlist) >= 2:
         facts.intent = "compare"
-    elif ASK_AREA_RE.search(text):
-        facts.intent = "ask_area"
     elif ASK_PROPERTY_RE.search(text) and state.shortlist:
         facts.intent = "ask_property"
+    elif ASK_AREA_RE.search(text) or facts.wants_area_recommendation:
+        facts.intent = "ask_area"
     elif objection and state.shortlist:
         facts.intent = "objection"
         facts.objection = objection  # type: ignore[assignment]
-    elif any(
-        v not in (None, [], "") for v in (slots.purpose, slots.property_type, slots.bedrooms, slots.timeline, slots.payment, slots.budget_text, slots.areas)
-    ) or facts.reactions:
+    elif has_slots or facts.reactions:
         facts.intent = "provide_info"
+    elif facts.asks_why:
+        facts.intent = "smalltalk"
     elif AGREE_RE.match(text):
         facts.intent = "agree"
     elif DISAGREE_RE.match(text):
@@ -263,7 +321,7 @@ def _merge(rules: ExtractedFacts, llm: LLMFacts, state: ConversationState) -> Ex
     merged = rules.model_copy(deep=True)
     merged.rules_only = False
     # Rules own STOP / human. Otherwise prefer the LLM's intent when rules were unsure.
-    if rules.intent in {"unclear", "smalltalk", "provide_info", "agree", "disagree"} and llm.intent not in {"stop", "request_human"}:
+    if rules.intent in {"unclear", "smalltalk", "provide_info", "agree", "disagree"} and llm.intent not in {"stop", "request_human", "goodbye"}:
         if llm.intent != "unclear":
             merged.intent = llm.intent
     if llm.objection and not merged.objection:

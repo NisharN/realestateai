@@ -33,6 +33,7 @@ from app.modules.leads.profile import lead_updates_from_state, merge
 from app.modules.store import lock_for, table
 from app.modules.tools import property_search
 from app.modules.tools.area_profile import area_profile
+from app.modules.tools.area_ranking import area_ranking
 from app.modules.tools.compare import compare
 from app.modules.tools.viewing_slots import next_slots
 from app.modules.handoff.viewings import request_viewing
@@ -184,6 +185,7 @@ async def _run(
     move = decision.move
     if decision.field:
         state.asked[decision.field] = state.asked.get(decision.field, 0) + 1
+    state.last_asked_field = decision.field if move in {Move.ASK_NEXT_FIELD, Move.GREETING} else None
     if move == Move.CLARIFY_BUDGET:
         state.asked["budget_clarify"] = state.asked.get("budget_clarify", 0) + 1
     if move == Move.CLARIFY_AREA:
@@ -198,12 +200,15 @@ async def _run(
     # 6. respond ----------------------------------------------------------
     reply_facts = _reply_facts(move, state, facts, tool_results, decision.field)
     resp_fallbacks: list[str]
-    if move == Move.SMALL_TALK_REDIRECT and not reply_facts.get("next_question") and state.shortlist:
-        reply, resp_fallbacks = templates.render("ask_reaction", state.language, reply_facts), []
+    if move == Move.SMALL_TALK_REDIRECT and not reply_facts.get("next_question"):
+        reply = templates.render("ask_reaction" if state.shortlist else "small_talk_generic", state.language, reply_facts)
+        resp_fallbacks = []
     else:
         reply, resp_fallbacks = await respond(
             move, state, reply_facts, deadline_s=deadline.remaining(settings.LLM_RESPOND_TIMEOUT_S), field=decision.field
         )
+    if facts.asks_why and move == Move.ASK_NEXT_FIELD and (facts.why_field or decision.field):
+        reply = f"{templates.render('why_explain', state.language, reply_facts, field=facts.why_field or decision.field)} {reply}"
     fallbacks.extend(resp_fallbacks)
     state.last_move = move.value
 
@@ -242,7 +247,9 @@ async def _run_tools(
 
     elif move == Move.ANSWER_AREA:
         target = (facts.area_candidates or state.value("community_ids") or [None])[0] or " ".join(facts.slots.areas) or (state.value("area") or [""])[0]
-        if target:
+        if facts.wants_area_recommendation or not target:
+            await guarded("ranking", area_ranking(workspace_id))
+        elif target:
             await guarded("area", area_profile(target, workspace_id, state.language))
 
     elif move == Move.ANSWER_PROPERTY:
@@ -367,6 +374,16 @@ def _reply_facts(move: Move, state: ConversationState, facts: ExtractedFacts, to
                 (f"حوالي {first.minutes} دقيقة إلى {first.to_name_ar}" if approx else f"{first.minutes} دقيقة إلى {first.to_name_ar}")
                 if state.language == "ar"
                 else (f"about {first.minutes} minutes to {first.to_name_en} (approx.)" if approx else f"{first.minutes} minutes to {first.to_name_en}")
+            )
+    ranking = tools.get("ranking")
+    if ranking is not None:
+        out["ranking"] = ranking.model_dump()
+        if ranking.areas:
+            names = [a.name_ar if state.language == "ar" else a.name_en for a in ranking.areas]
+            out["ranking_text"] = (
+                "، ".join(f"{n} (~{a.gross_yield_pct}%)" for n, a in zip(names, ranking.areas))
+                if state.language == "ar"
+                else ", ".join(f"{n} (~{a.gross_yield_pct}% gross)" for n, a in zip(names, ranking.areas))
             )
     cmp = tools.get("compare")
     if cmp is not None and cmp.rows:

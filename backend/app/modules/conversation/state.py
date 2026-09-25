@@ -55,6 +55,7 @@ class ConversationState(BaseModel):
     asked: dict[str, int] = Field(default_factory=dict)
     misunderstandings: int = 0
     last_move: str | None = None
+    last_asked_field: str | None = None
     turn: int = 0
     score: int = 0
     score_reasons: list[str] = Field(default_factory=list)
@@ -74,7 +75,8 @@ class ConversationState(BaseModel):
         return self.value(slot) not in (None, "", [], {})
 
     def missing_required(self) -> list[str]:
-        return [s for s in REQUIRED_SLOTS if not self.has(s)]
+        # A bedroom count is enough to search on when the buyer never named a type.
+        return [s for s in REQUIRED_SLOTS if not self.has(s) and not (s == "property_type" and self.has("bedrooms"))]
 
     def missing_for_qualification(self) -> list[str]:
         return [s for s in QUALIFICATION_SLOTS if not self.has(s)]

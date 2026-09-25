@@ -155,6 +155,8 @@ h1, h2, h3 {
   width: 100%;
   height: 100%;
   border-radius: 12px;
+  isolation: isolate; /* keep Leaflet's z-index 400+ panes inside the card */
+  z-index: 0;
 }
 
 .leaflet-popup-content-wrapper {

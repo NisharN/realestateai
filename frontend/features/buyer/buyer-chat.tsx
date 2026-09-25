@@ -11,7 +11,7 @@ import { Composer } from "./components/composer";
 import { IntakeFormPanel } from "./components/intake-form";
 import { MessageList } from "./components/message-list";
 import { Sidebar } from "./components/sidebar";
-import { VoiceModal } from "./components/voice-modal";
+import { useVoiceAgent } from "./voice/use-voice-agent";
 
 // Leaflet touches `window` at import time — client-only.
 const PropertyMap = dynamic(() => import("./maps/property-map").then((m) => m.PropertyMap), {
@@ -21,7 +21,17 @@ const PropertyMap = dynamic(() => import("./maps/property-map").then((m) => m.Pr
 
 export function BuyerChat() {
   const chat = useBuyerChat();
-  const [showVoice, setShowVoice] = useState(false);
+  // Voice is an alternate input/output channel on the same thread: transcripts and
+  // replies land in `chat.messages`; the mic lives in the composer (ChatGPT/Claude style).
+  const voice = useVoiceAgent(
+    {
+      ensureLead: chat.ensureLead,
+      onUserTranscript: chat.onVoiceTranscript,
+      onAgentReply: chat.onVoiceReply,
+    },
+    chat.language,
+  );
+  const startVoice = () => void voice.toggle();
   const [mapOpen, setMapOpen] = useState(false);
   const [mapFocus, setMapFocus] = useState<Property | null>(null);
 
@@ -33,7 +43,7 @@ export function BuyerChat() {
 
   return (
     <div className="flex h-screen bg-canvas" dir={dirFor(chat.language)} lang={chat.language}>
-      <Sidebar t={chat.t} needsHuman={chat.needsHuman} onSend={chat.sendMessage} onVoice={() => setShowVoice(true)} />
+      <Sidebar t={chat.t} needsHuman={chat.needsHuman} onSend={chat.sendMessage} onVoice={startVoice} />
 
       <main className="flex-1 flex flex-col min-w-0">
         <ChatHeader
@@ -41,7 +51,7 @@ export function BuyerChat() {
           language={chat.language}
           leadId={chat.leadId}
           onToggleLanguage={() => chat.setLanguage(chat.language === "en" ? "ar" : "en")}
-          onVoice={() => setShowVoice(true)}
+          onVoice={startVoice}
         />
 
         <AnimatePresence>
@@ -70,7 +80,7 @@ export function BuyerChat() {
           disabled={chat.isLoading}
           showQuickReplies={chat.messages.length < 3}
           onSend={chat.sendMessage}
-          onVoice={() => setShowVoice(true)}
+          voice={voice}
         />
       </main>
 
@@ -84,12 +94,6 @@ export function BuyerChat() {
               setMapFocus(null);
             }}
           />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showVoice && (
-          <VoiceModal isOpen={showVoice} onClose={() => setShowVoice(false)} leadId={chat.leadId} t={chat.t} onAgentMessage={chat.onVoiceReply} />
         )}
       </AnimatePresence>
     </div>

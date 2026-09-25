@@ -407,3 +407,78 @@
       move: confirm_handoff
       reply_excludes: ["great choice"]
       reply_includes: ["specialist"]
+
+# --- English robustness (from adversarial probe) -----------------------------
+- id: en_sidestepped_type_does_not_dangle
+  turns:
+    - say: "i wanna rent a place"
+      slots: {purpose: rent}
+    - say: "marina or jbr"
+    - say: "like 120k a year"
+    - say: "1 bed is fine"
+      slots: {bedrooms: 1}
+      move: suggest
+      reply_excludes: ["options —"]
+- id: en_invest_not_rent
+  turns:
+    - say: "I want to invest, what areas give good rental yield?"
+      slots: {purpose: invest}
+      move: answer_area
+      reply_contains: ["yield"]
+- id: en_why_about_area_while_asked_budget
+  turns:
+    - say: "buy"
+    - say: "marina"
+    - say: "why do you ask about the area?"
+      move: ask_next_field
+      reply_contains: ["areas you like", "apartment, villa"]
+- id: en_bedroom_range_not_budget
+  turns:
+    - say: "buy"
+    - say: "marina"
+    - say: "2-3 bedrooms"
+      move: ask_next_field
+      slots: {bedrooms: 2}
+      reply_excludes: ["2 million or 2 thousand"]
+    - say: "between 2 and 3 million"
+      move: suggest
+      slots: {budget.min_aed: 2000000.0, budget.max_aed: 3000000.0}
+    - say: "3-6 months"
+      slots: {timeline: 6_months}
+      reply_excludes: ["3 million or 3 thousand"]
+- id: en_why_question_is_explained
+  turns:
+    - say: "rent"
+    - say: "why do you need my budget?"
+      move: ask_next_field
+      reply_contains: ["budget lets me", "What budget"]
+- id: en_goodbye_closes_politely
+  turns:
+    - say: "buy"
+    - say: "downtown 2br 3m 3 months"
+    - say: "thanks, that's all for now"
+      move: goodbye
+      ended: false
+      reply_contains: ["saved your brief"]
+- id: en_million_typo
+  turns:
+    - say: "buy a 2 bed apartment in dubai marina"
+    - say: "2.5 milion"
+      move: suggest
+      slots: {budget.max_aed: 2500000.0}
+- id: en_price_question_about_area
+  turns:
+    - say: "What's the price of apartments in Downtown?"
+      move: answer_area
+      reply_contains: ["Downtown"]
+- id: en_flexible_and_this_year_timelines
+  turns:
+    - say: "buy a 1 bed in JVC for 900k"
+      move: suggest
+    - say: "flexible"
+      slots: {timeline: 12_months}
+- id: en_one_br_implies_apartment
+  turns:
+    - say: "I'm relocating to Dubai in 2 months for work and need a furnished 1BR to rent in Business Bay, max 90,000 per year"
+      slots: {property_type: apartment, bedrooms: 1, purpose: rent, timeline: 3_months}
+      move: suggest

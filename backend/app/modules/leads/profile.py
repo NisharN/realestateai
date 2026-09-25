@@ -101,6 +101,9 @@ def _spoken_number(m: re.Match[str]) -> str:
     return f"{value:g}"
 
 
+_MONEY_TYPOS = re.compile(r"\b(mil+i?on|milion|millon|mn|mill)\b", re.I)
+
+
 def normalise_money_text(text: str) -> str:
     """Digits/keywords only — Arabic numerals and money words, and spoken
     numbers (voice transcripts: "two point five million") become digits."""
@@ -108,6 +111,7 @@ def normalise_money_text(text: str) -> str:
     for ar, en in _AR_MONEY:
         out = out.replace(ar, en)
     out = _SPOKEN_NUMBER.sub(_spoken_number, out)
+    out = _MONEY_TYPOS.sub("million", out)
     return out.replace(" dirhams", " AED").replace(" dirham", " AED")
 
 

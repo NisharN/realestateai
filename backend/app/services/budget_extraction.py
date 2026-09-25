@@ -69,6 +69,12 @@ SUFFIX_MULTIPLIER = {
     "lakh": 100_000, "lac": 100_000,
 }
 
+# "2-3 million", "between 2 and 3M": the first number shares the suffix.
+RANGE_SHARED_SUFFIX = re.compile(
+    r"(?P<low>\d+(?:\.\d+)?)\s*(?:-|–|to|and|or)\s*(?P<high>\d+(?:\.\d+)?)\s*(?P<suffix>m\b|mn\b|million\b|k\b|thousand\b)",
+    re.I,
+)
+
 # Numbers followed by these are describing the property, not the money:
 # "2 bed", "3 br", "1200 sqft", "floor 15", "2 bathrooms".
 NON_MONEY_UNIT = re.compile(
@@ -168,6 +174,11 @@ def _parse_amounts(text: str) -> list[float]:
             # appears, and flagged for clarification by the caller.
             bare.append(value)
 
+    rng = RANGE_SHARED_SUFFIX.search(text)
+    if rng and len(scaled) == 1:
+        low = float(rng.group("low")) * SUFFIX_MULTIPLIER.get(rng.group("suffix").lower(), 1)
+        if low < scaled[0]:
+            scaled.insert(0, low)
     return scaled or bare
 
 
