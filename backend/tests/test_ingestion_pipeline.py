@@ -587,3 +587,27 @@ def test_pin_crm_url_connects_to_checked_address(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)), (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))])
     with pytest.raises(ValueError):
         pin_crm_url("https://crm.example.com/leads")
+
+
+async def test_suppression_normalizes_local_phones():
+    from app.modules.ingestion.pipeline.processor import suppress_contact
+
+    await suppress_contact(WS, phone="0501110000", email=None, reason="opt_out")
+    assert (await table("suppression_list", WS).select())[0]["phone"] == "+971501110000"
+    result = await land([RawRecord(external_id="p2", payload={"phone": "+971 50 111 0000", "name": "Sup"})], connector_id="csv", workspace_id=WS)
+    assert (await process_record(result.ids[0], workspace_id=WS)).status == "review"
+
+
+def test_merge_updates_protects_mirrors_of_broker_edits():
+    from app.modules.ingestion.pipeline.processor import merge_updates
+
+    existing = {"id": "l", "budget_max_aed": 0, "budget_max": 0, "broker_edited_fields": ["budget_max_aed"]}
+    updates, _ = merge_updates(existing, {"budget_max_aed": 3_000_000, "budget_max": 3_000_000})
+    assert "budget_max" not in updates and "budget_max_aed" not in updates
+
+
+def test_connector_url_credentials_are_redacted():
+    from app.api.admin import _redact_config
+
+    out = _redact_config({"url": "https://user:pw@crm.test/leads?api_key=abc&page=1"})
+    assert out["url"] == "https://[redacted]@crm.test/leads?api_key=[redacted]&page=1"

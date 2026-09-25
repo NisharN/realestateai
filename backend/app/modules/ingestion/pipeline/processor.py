@@ -16,7 +16,7 @@ from app.modules.geo.communities import get_community
 from app.modules.ingestion import events
 from app.modules.ingestion.field_maps import approved_field_map
 from app.modules.ingestion.models import CanonicalLead, MergeResult, PipelineOutcome
-from app.modules.ingestion.pipeline.stages import clean_record, map_record, validate_record
+from app.modules.ingestion.pipeline.stages import clean_phone, clean_record, map_record, validate_record
 from app.modules.store import Row, new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
@@ -177,9 +177,13 @@ def lead_columns(lead: CanonicalLead) -> dict[str, Any]:
     return {k: v for k, v in cols.items() if v is not None}
 
 
+FIELD_MIRRORS = {"budget_min_aed": "budget_min", "budget_max_aed": "budget_max", "property_types": "property_type"}
+
+
 def merge_updates(existing: Row, incoming: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """Never overwrite with null; CRM owns contact fields; buyer-confirmed and broker-edited facts win."""
     buyer_fields = set(existing.get("buyer_confirmed_fields") or []) | set(existing.get("broker_edited_fields") or [])
+    buyer_fields |= {mirror for canonical, mirror in FIELD_MIRRORS.items() if canonical in buyer_fields}
     updates: dict[str, Any] = {}
     for key, value in incoming.items():
         if value in (None, "", [], {}):
@@ -281,7 +285,7 @@ async def _suppression(workspace_id: str) -> set[str]:
     out: set[str] = set()
     for r in rows:
         if r.get("phone"):
-            out.add(str(r["phone"]))
+            out.add(clean_phone(str(r["phone"])) or str(r["phone"]))
         if r.get("email"):
             out.add(str(r["email"]).strip().lower())
     return out
@@ -291,6 +295,7 @@ async def suppress_contact(workspace_id: str, *, phone: str | None, email: str |
     """Add a buyer's contact points to the suppression list (idempotent)."""
     sup = table("suppression_list", workspace_id)
     email = email.strip().lower() if email else None
+    phone = (clean_phone(phone) or phone.strip()) if phone else None
     if phone and not await sup.get(phone=phone):
         await sup.insert({"id": new_id(), "phone": phone, "email": None, "reason": reason, "created_at": now_iso()})
     if email and not await sup.get(email=email):

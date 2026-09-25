@@ -40,8 +40,8 @@ router = APIRouter()
 HEARTBEAT_S = 20.0
 THINKING_AFTER_S = 1.2
 LOW_CONFIDENCE = 0.6
-ENGINE_DRAIN_S = 15.0
 MAX_TTS_CHARS = 600
+MAX_TEXT_CHARS = 2000
 MAX_AUDIO_BYTES = 2 * 1024 * 1024  # one utterance (~60 s of 16 kHz mono PCM), not a stream
 MAX_AUDIO_B64_CHARS = MAX_AUDIO_BYTES * 4 // 3 + 4
 YES_WORDS = {"yes", "yeah", "yep", "correct", "right", "نعم", "ايوه", "أيوه", "صح"}
@@ -153,12 +153,11 @@ class VoiceSession:
         """After a barge-in the engine still finishes; its persisted outcome
         (state, handoff) is delivered as a text-only reply rather than hidden."""
         try:
-            result = await asyncio.wait_for(asyncio.shield(engine), ENGINE_DRAIN_S)
-        except asyncio.TimeoutError:
-            # Only delivery gives up; the engine keeps running so the turn is
-            # never left half-persisted.
-            logger.warning("voice engine still running %.0fs after interrupt for lead %s", ENGINE_DRAIN_S, self.lead_id)
-            return
+            result = await asyncio.shield(engine)
+        except asyncio.CancelledError:
+            # Socket closed; the engine keeps running so the turn is never
+            # left half-persisted, and the outcome is replayed on resume.
+            raise
         except Exception as exc:
             logger.warning("voice engine failed after interrupt for lead %s: %s", self.lead_id, exc)
             return
@@ -269,6 +268,8 @@ async def voice_conversation(
                 await session.interrupt()
             elif kind == "audio" and len(message.get("data") or "") > MAX_AUDIO_B64_CHARS:
                 await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "audio_too_large", "recoverable": True, "max_bytes": MAX_AUDIO_BYTES})
+            elif kind == "text" and len(message.get("text") or "") > MAX_TEXT_CHARS:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "text_too_long", "recoverable": True, "max_chars": MAX_TEXT_CHARS})
             elif kind in {"audio", "text"}:
                 await session.interrupt()  # a new utterance always wins over an in-flight reply
                 session.start_turn(message)

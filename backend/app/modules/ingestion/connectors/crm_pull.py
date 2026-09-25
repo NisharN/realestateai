@@ -89,7 +89,7 @@ class CrmPullConnector:
 
         records: list[RawRecord] = []
         next_cursor = cursor
-        client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S)
+        client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S, trust_env=False)
         try:
             for _ in range(MAX_PAGES):
                 params = dict(self.config.get("extra_params") or {})
@@ -139,7 +139,7 @@ class CrmPullConnector:
         if urlsplit(target)[:2] != urlsplit(url)[:2]:
             raise ValueError("CRM external id altered the write-back host")
         pinned = pin_crm_url(target) if self._client is None else PinnedUrl(target, {}, {})
-        client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S)
+        client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S, trust_env=False)
         try:
             resp = await client.patch(pinned.url, json=fields, headers={**self._headers(), **pinned.headers}, extensions=pinned.extensions)
             if resp.status_code >= 400:

@@ -161,3 +161,14 @@ def test_interrupt_after_engine_commit_still_delivers_reply():
 def test_synthesize_rejects_oversized_text():
     resp = client.post("/api/v1/voice/synthesize", params={"text": "x" * (voice_api.MAX_TTS_CHARS + 1)})
     assert resp.status_code == 422
+
+
+def test_oversized_text_frame_is_rejected_without_closing():
+    lead_id = _lead()
+    with _connect(lead_id) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "text", "turn_id": "long", "text": "a" * (voice_api.MAX_TEXT_CHARS + 1)})
+        err = ws.receive_json()
+        assert err["type"] == "error" and err["code"] == "text_too_long" and err["recoverable"] is True
+        ws.send_json({"type": "text", "text": "hi"})
+        assert ws.receive_json()["type"] == "transcript"
