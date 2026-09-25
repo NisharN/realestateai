@@ -45,6 +45,8 @@ async def process_record(raw_id: str, *, workspace_id: str) -> PipelineOutcome:
         if record.get("source_hint"):
             payload.setdefault("__source_hint", record["source_hint"])
         draft = map_record(payload, field_map)
+        if not draft.external_id and record.get("external_id"):
+            draft.external_id = str(record["external_id"])
         await set_status("mapped")
 
         cleaned = clean_record(draft)
@@ -91,6 +93,13 @@ async def process_many(raw_ids: list[str], *, workspace_id: str) -> list[Pipelin
 async def retry_errors(workspace_id: str, limit: int = 100) -> list[PipelineOutcome]:
     rows = await table("raw_lead_records", workspace_id).select(status="error", limit=limit)
     return await process_many([r["id"] for r in rows], workspace_id=workspace_id)
+
+
+async def process_stranded(workspace_id: str, *, older_than_seconds: int = 300, limit: int = 500) -> list[PipelineOutcome]:
+    """Pick up records that landed but were never dispatched (worker/broker outage between land and enqueue)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)).isoformat()
+    rows = await table("raw_lead_records", workspace_id).select(status="landed", order="received_at", limit=limit)
+    return await process_many([r["id"] for r in rows if (r.get("received_at") or "") <= cutoff], workspace_id=workspace_id)
 
 
 # --------------------------------------------------------- 4 Match+merge

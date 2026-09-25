@@ -42,7 +42,7 @@ alter table public.handoffs
 create table if not exists public.connectors (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
-  type text not null check (type in ('csv_upload','webhook','google_sheets','portal_email','hubspot','zoho','salesforce','bitrix24','whatsapp','manual')),
+  type text not null check (type in ('csv_upload','webhook','google_sheets','portal_email','hubspot','zoho','salesforce','bitrix24','generic_crm','whatsapp','manual')),
   mode text not null default 'push' check (mode in ('pull','push')),
   display_name text not null,
   status text not null default 'active' check (status in ('active','paused','disabled')),

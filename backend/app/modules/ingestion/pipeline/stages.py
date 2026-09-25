@@ -23,7 +23,7 @@ _SOURCE_ALIASES = {
     "web": "web", "website": "web", "site": "web", "landing": "web", "form": "web",
     "referral": "referral", "referred": "referral",
     "whatsapp": "whatsapp", "wa": "whatsapp",
-    "crm": "crm", "hubspot": "crm", "zoho": "crm", "salesforce": "crm", "bitrix": "crm", "bitrix24": "crm",
+    "crm": "crm", "generic_crm": "crm", "hubspot": "crm", "zoho": "crm", "salesforce": "crm", "bitrix": "crm", "bitrix24": "crm",
     "csv": "csv", "webhook": "webhook", "manual": "manual",
 }
 _TYPE_ALIASES = {

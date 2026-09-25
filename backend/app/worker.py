@@ -61,6 +61,10 @@ celery_app.conf.update(
             "task": "app.worker.retry_ingestion_errors",
             "schedule": 120.0,
         },
+        "poll-pull-connectors": {
+            "task": "app.worker.poll_pull_connectors",
+            "schedule": 60.0,
+        },
     },
 )
 
@@ -374,9 +378,32 @@ def send_due_followups() -> int:
 
 @celery_app.task(name="app.worker.retry_ingestion_errors")
 def retry_ingestion_errors() -> int:
-    from app.modules.ingestion.pipeline.processor import retry_errors
+    from app.modules.ingestion.pipeline.processor import process_stranded, retry_errors
 
-    return len(_run_async(retry_errors(settings.WORKSPACE_ID)))
+    async def _run() -> int:
+        ws = settings.WORKSPACE_ID
+        return len(await retry_errors(ws)) + len(await process_stranded(ws))
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.worker.poll_pull_connectors")
+def poll_pull_connectors() -> int:
+    """Pull every due CRM connector, land its records, then process them."""
+    from app.modules.ingestion.connectors.crm_pull import due_pull_connectors, poll_connector
+
+    async def _run() -> int:
+        ws = settings.WORKSPACE_ID
+        landed = 0
+        for connector in await due_pull_connectors(ws):
+            result = await poll_connector(connector["id"], workspace_id=ws)
+            ids = result.get("raw_ids", [])
+            if ids:
+                process_raw_records.delay(ws, ids)
+            landed += len(ids)
+        return landed
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.worker.process_raw_records")

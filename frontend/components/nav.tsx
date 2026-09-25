@@ -13,6 +13,8 @@ import {
   Users,
   Map as MapIcon,
   Zap,
+  ClipboardList,
+  DatabaseZap,
 } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { navigationForRole, type WorkspaceRole } from "@/lib/navigation";
@@ -20,6 +22,8 @@ import { navigationForRole, type WorkspaceRole } from "@/lib/navigation";
 const ICONS = {
   chat: MessageCircle,
   dashboard: LayoutDashboard,
+  broker: ClipboardList,
+  ingestion: DatabaseZap,
   properties: Building2,
   market: MapIcon,
   automations: Zap,
@@ -56,7 +60,7 @@ export function Nav() {
 
         <div className="flex items-center gap-1 relative">
           {items.map((item) => {
-            const active = pathname === item.href;
+            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             const Icon = ICONS[item.icon];
             return (
               <Link

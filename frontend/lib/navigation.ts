@@ -6,6 +6,8 @@ export interface NavigationItem {
   icon:
     | "chat"
     | "dashboard"
+    | "broker"
+    | "ingestion"
     | "properties"
     | "market"
     | "automations"
@@ -26,6 +28,7 @@ export interface NavigationItem {
 const common: NavigationItem[] = [
   { href: "/", label: "Chat", icon: "chat" },
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
+  { href: "/broker", label: "Today", icon: "broker" },
   { href: "/properties", label: "Properties", icon: "properties" },
   { href: "/market", label: "Market", icon: "market" },
   { href: "/automations", label: "Automations", icon: "automations" },
@@ -35,6 +38,7 @@ export function navigationForRole(role: WorkspaceRole): NavigationItem[] {
   if (role === "agent") return common;
   return [
     ...common,
+    { href: "/admin/ingestion", label: "Ingestion", icon: "ingestion" },
     { href: "/configure", label: "Configure", icon: "configure" },
     { href: "/members", label: "Members", icon: "members" },
     { href: "/docs", label: "Docs", icon: "docs" },
