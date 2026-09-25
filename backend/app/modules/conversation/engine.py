@@ -315,8 +315,7 @@ def _advance_stage(state: ConversationState, move: Move, tools: dict[str, Any]) 
     elif move == Move.SUGGEST:
         found = bool(tools.get("search") and tools["search"].cards)
         state.stage = "suggesting" if found else "refining"
-        if not found:
-            state.asked["suggest_empty"] = state.asked.get("suggest_empty", 0) + 1
+        state.asked["suggest_empty"] = 0 if found else state.asked.get("suggest_empty", 0) + 1
     elif move in {Move.HANDLE_OBJECTION, Move.COMPARE, Move.ANSWER_PROPERTY}:
         state.stage = "refining"
     elif move in {Move.ASK_NEXT_FIELD, Move.CLARIFY_AREA, Move.CLARIFY_BUDGET, Move.GREETING}:

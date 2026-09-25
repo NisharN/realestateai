@@ -55,7 +55,7 @@ async def respond(
     template_key = None
     if move == Move.SUGGEST and not facts.get("cards"):
         template_key = "suggest_empty"
-    elif move == Move.CONFIRM_HANDOFF and not state.shortlist:
+    elif move == Move.CONFIRM_HANDOFF and (not state.shortlist or state.asked.get("suggest_empty", 0) > 0):
         template_key = "confirm_handoff_no_inventory"
     template_reply = templates.render(move, state.language, facts, field=field, key=template_key)
 

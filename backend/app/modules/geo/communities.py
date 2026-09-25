@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Iterable
@@ -64,12 +65,12 @@ COMMUNITIES: tuple[Community, ...] = (
     Community("the_greens", "The Greens", "الروضة", 25.0930, 55.1740, ("greens", "the views")),
     Community("al_quoz", "Al Quoz", "القوز", 25.1380, 55.2290, ("quoz",)),
     Community("bur_dubai", "Bur Dubai", "بر دبي", 25.2530, 55.2960, ("al mankhool", "mankhool")),
-    Community("deira", "Deira", "ديرة", 25.2710, 55.3170, ("al rigga", "deira islands")),
+    Community("deira", "Deira", "ديرة", 25.2710, 55.3170, ("al rigga",)),
     Community("mirdif", "Mirdif", "مردف", 25.2200, 55.4190, ("mirdiff",)),
     Community("al_jaddaf", "Al Jaddaf", "الجداف", 25.2200, 55.3320, ("jaddaf", "culture village", "dubai healthcare city")),
     Community("bluewaters", "Bluewaters Island", "جزيرة بلوواترز", 25.0810, 55.1210, ("bluewaters",)),
     Community("city_walk", "City Walk", "سيتي ووك", 25.2070, 55.2620, ("citywalk", "al wasl")),
-    Community("dubai_land", "Dubailand", "دبي لاند", 25.0600, 55.3000, ("dubailand", "dubai land", "villanova", "rukan", "arjan", "majan")),
+    Community("dubai_land", "Dubailand", "دبي لاند", 25.0600, 55.3000, ("dubai land", "villanova", "rukan", "arjan", "majan")),
     Community("jumeirah_golf_estates", "Jumeirah Golf Estates", "جميرا للجولف", 25.0180, 55.1740, ("jge", "golf estates")),
     Community("tilal_al_ghaf", "Tilal Al Ghaf", "تلال الغاف", 25.0380, 55.2270, ("tilal",)),
     Community("dubai_islands", "Dubai Islands", "جزر دبي", 25.3060, 55.3040, ("deira islands",)),
@@ -111,6 +112,8 @@ def _terms(community: Community) -> list[str]:
 
 _INDEX: list[tuple[str, Community]] = [(t, c) for c in COMMUNITIES for t in _terms(c) if t]
 _INDEX.sort(key=lambda item: -len(item[0]))
+_DUPLICATE_TERMS = {t for t, n in Counter(t for t, _ in _INDEX).items() if n > 1}
+assert not _DUPLICATE_TERMS, f"ambiguous community aliases: {sorted(_DUPLICATE_TERMS)}"
 
 
 def get_community(community_id: str) -> Community | None:

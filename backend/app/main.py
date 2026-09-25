@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.modules.ops.health import deep_health
+from app.modules.store import load_demo_scale
 from app.api import (
     admin,
     auth,
@@ -39,7 +40,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("🚀 Dubai Real Estate AI Platform starting...")
-    # Startup: verify connections, warm up models
+    counts = load_demo_scale()
+    if counts:
+        logger.info("demo scale data loaded: %s", counts)
     yield
     # Shutdown: cleanup
     logger.info("👋 Shutting down...")

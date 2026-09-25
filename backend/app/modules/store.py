@@ -45,6 +45,17 @@ _MEMORY: dict[str, list[Row]] = defaultdict(list)
 _LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
+def load_demo_scale() -> dict[str, int] | None:
+    """Populate the stress-scale demo book when ``DEMO_SEED_SCALE`` > 0 in mock mode."""
+    from app.database import _use_mock_store
+    from app.mock_store import load_scale_data
+
+    scale = int(get_settings().DEMO_SEED_SCALE or 0)
+    if scale <= 0 or not _use_mock_store():
+        return None
+    return load_scale_data(scale, _MEMORY)
+
+
 def reset_memory() -> None:
     _MEMORY.clear()
 
@@ -114,10 +125,10 @@ class MemoryTable:
 
     async def select(self, *, order: str | None = None, desc: bool = False, limit: int = 100, offset: int = 0, **filters: Any) -> list[Row]:
         scoped = self._scoped(filters)
-        rows = [deepcopy(r) for r in self._rows if _matches(r, scoped)]
+        rows = [r for r in self._rows if _matches(r, scoped)]
         if order:
             rows.sort(key=lambda r: (r.get(order) is None, r.get(order)), reverse=desc)
-        return rows[offset : offset + limit]
+        return [deepcopy(r) for r in rows[offset : offset + limit]]
 
     async def update(self, updates: Row, **filters: Any) -> list[Row]:
         scoped = self._scoped(filters)
