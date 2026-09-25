@@ -53,12 +53,13 @@ export default function IngestionAdminPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-5 py-8">
+    <main className="px-5 py-8 lg:px-10">
       <div className="mx-auto max-w-6xl">
-        <h1 className="text-3xl font-semibold">Lead ingestion</h1>
-        <p className="mt-1 text-slate-600">Connect CRMs, upload CSVs, fix records that failed validation, and watch pipeline health.</p>
+        <p className="ui-kicker">Admin</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Lead ingestion</h1>
+        <p className="mt-1 text-muted-foreground">Connect CRMs, upload CSVs, fix records that failed validation, and watch pipeline health.</p>
 
-        <div role="tablist" className="mt-6 flex gap-1 rounded-xl bg-slate-200/70 p-1 text-sm font-medium">
+        <div role="tablist" className="mt-6 flex gap-1 rounded-xl border border-border bg-card p-1 text-sm font-medium shadow-card">
           {(
             [
               ["connectors", "Connectors"],
@@ -73,15 +74,15 @@ export default function IngestionAdminPage() {
               role="tab"
               aria-selected={tab === key}
               onClick={() => setTab(key)}
-              className={`flex-1 rounded-lg px-3 py-2 ${tab === key ? "bg-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+              className={`flex-1 rounded-lg px-3 py-2 ${tab === key ? "bg-brand text-white shadow-card" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
             >
               {label}
             </button>
           ))}
         </div>
 
-        {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        {message && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{message}</p>}
+        {error && <p role="alert" className="mt-4 rounded-xl bg-danger-soft p-3 text-sm text-danger">{error}</p>}
+        {message && <p role="status" className="mt-4 rounded-xl bg-success-soft p-3 text-sm text-success">{message}</p>}
 
         <div className="mt-6">
           {tab === "connectors" && <ConnectorsTab say={say} />}
@@ -169,8 +170,8 @@ function ConnectorsTab({ say }: { say: Say }) {
 
   return (
     <div className="grid gap-6">
-      <form onSubmit={create} className="grid gap-3 rounded-2xl border bg-white p-5 md:grid-cols-2">
-        <h2 className="md:col-span-2 text-sm font-semibold uppercase tracking-wide text-slate-600">Add connector</h2>
+      <form onSubmit={create} className="grid gap-3 ui-card p-5 md:grid-cols-2">
+        <h2 className="md:col-span-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Add connector</h2>
         <select aria-label="Connector type" value={type} onChange={(e) => setType(e.target.value)} className="rounded-xl border px-4 py-3">
           {CONNECTOR_TYPES.map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
@@ -184,19 +185,19 @@ function ConnectorsTab({ say }: { say: Say }) {
             <input aria-label="Records path" value={recordsPath} onChange={(e) => setRecordsPath(e.target.value)} placeholder="Records path in response, e.g. data.items" className="rounded-xl border px-4 py-3" />
             <input aria-label="Cursor query param" value={cursorParam} onChange={(e) => setCursorParam(e.target.value)} placeholder="Cursor query param" className="rounded-xl border px-4 py-3" />
             <input aria-label="Cursor field" value={cursorField} onChange={(e) => setCursorField(e.target.value)} placeholder="Record field used as cursor" className="rounded-xl border px-4 py-3" />
-            <label className="flex items-center gap-2 text-sm text-slate-600">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
               Poll every
               <input aria-label="Schedule seconds" type="number" min={60} max={86400} value={schedule} onChange={(e) => setSchedule(e.target.value)} className="w-28 rounded-xl border px-3 py-2" />
               seconds
             </label>
           </>
         )}
-        <button className="rounded-xl bg-slate-950 px-5 py-3 font-semibold text-white md:col-start-2 md:justify-self-end">Create</button>
+        <button className="rounded-xl bg-brand px-5 py-3 font-semibold text-white md:col-start-2 md:justify-self-end">Create</button>
       </form>
 
-      <div className="overflow-hidden rounded-2xl border bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-100">
+          <thead className="bg-muted">
             <tr>
               <th className="p-3">Connector</th>
               <th className="p-3">Mode</th>
@@ -207,32 +208,32 @@ function ConnectorsTab({ say }: { say: Say }) {
           </thead>
           <tbody>
             {connectors.length === 0 && (
-              <tr><td colSpan={5} className="p-4 text-slate-500">No connectors yet.</td></tr>
+              <tr><td colSpan={5} className="p-4 text-muted-foreground">No connectors yet.</td></tr>
             )}
             {connectors.map((c) => (
               <tr key={c.id} className="border-t align-top">
                 <td className="p-3">
                   <p className="font-medium">{c.display_name}</p>
-                  <p className="text-xs text-slate-500">{c.type} · <span className="font-mono">{c.id}</span></p>
-                  {c.webhook_path && <p className="mt-1 font-mono text-xs text-slate-600">POST {c.webhook_path}</p>}
+                  <p className="text-xs text-muted-foreground">{c.type} · <span className="font-mono">{c.id}</span></p>
+                  {c.webhook_path && <p className="mt-1 font-mono text-xs text-muted-foreground">POST {c.webhook_path}</p>}
                   {revealed[c.id] && (
-                    <p className="mt-1 break-all rounded bg-amber-50 p-2 font-mono text-xs text-amber-900">secret: {revealed[c.id]}</p>
+                    <p className="mt-1 break-all rounded bg-warning-soft p-2 font-mono text-xs text-amber-900">secret: {revealed[c.id]}</p>
                   )}
-                  {c.last_error && <p className="mt-1 text-xs text-red-600">{c.last_error}</p>}
+                  {c.last_error && <p className="mt-1 text-xs text-danger">{c.last_error}</p>}
                 </td>
                 <td className="p-3">{c.mode}{c.mode === "pull" && c.schedule_seconds ? ` / ${c.schedule_seconds}s` : ""}</td>
                 <td className="p-3">
                   <span className="capitalize">{c.status}</span>
-                  {c.consecutive_failures > 0 && <span className="ml-1 text-xs text-red-600">({c.consecutive_failures} failures)</span>}
+                  {c.consecutive_failures > 0 && <span className="ml-1 text-xs text-danger">({c.consecutive_failures} failures)</span>}
                 </td>
-                <td className="p-3 text-xs text-slate-600">
+                <td className="p-3 text-xs text-muted-foreground">
                   {relativeTime(c.last_run_at)}
-                  {c.last_success_at && <p className="text-slate-400">ok {relativeTime(c.last_success_at)}</p>}
+                  {c.last_success_at && <p className="text-muted-foreground/70">ok {relativeTime(c.last_success_at)}</p>}
                 </td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-1.5 text-xs">
                     {c.mode === "pull" && (
-                      <button onClick={() => run(c)} className="rounded-lg bg-slate-950 px-2.5 py-1 font-semibold text-white">Run now</button>
+                      <button onClick={() => run(c)} className="rounded-lg bg-brand px-2.5 py-1 font-semibold text-white">Run now</button>
                     )}
                     <button onClick={() => openMapping(c)} className="rounded-lg border px-2.5 py-1">Field map</button>
                     {c.type === "webhook" && (
@@ -284,19 +285,19 @@ function FieldMapEditor({
 
   if (rows.length === 0) {
     return (
-      <section className="rounded-2xl border bg-white p-5 text-sm">
-        <p className="text-slate-600">No records have arrived on this connector yet, so there is nothing to map. Upload or push a sample first.</p>
+      <section className="ui-card p-5 text-sm">
+        <p className="text-muted-foreground">No records have arrived on this connector yet, so there is nothing to map. Upload or push a sample first.</p>
         <button onClick={onClose} className="mt-3 rounded-lg border px-3 py-1.5 text-xs">Close</button>
       </section>
     );
   }
 
   return (
-    <section className="rounded-2xl border bg-white p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Field map · <span className="font-mono normal-case">{mapping.id}</span></h2>
-      <p className="mt-1 text-xs text-slate-500">Suggestions come from header names and sample values. Approve to apply on the next run; unmapped columns are kept in the lead&apos;s extra data.</p>
+    <section className="ui-card p-5">
+      <h2 className="ui-kicker">Field map · <span className="font-mono normal-case">{mapping.id}</span></h2>
+      <p className="mt-1 text-xs text-muted-foreground">Suggestions come from header names and sample values. Approve to apply on the next run; unmapped columns are kept in the lead&apos;s extra data.</p>
       <table className="mt-3 w-full text-sm">
-        <thead className="text-left text-xs uppercase text-slate-500">
+        <thead className="text-left text-xs uppercase text-muted-foreground">
           <tr><th className="py-1">Source column</th><th className="py-1">Target field</th><th className="py-1">Confidence</th></tr>
         </thead>
         <tbody>
@@ -313,13 +314,13 @@ function FieldMapEditor({
                   {TARGET_FIELDS.map((t) => <option key={t} value={t}>{t || "— ignore —"}</option>)}
                 </select>
               </td>
-              <td className="py-2 text-xs text-slate-500">{row.approved_at ? "approved" : row.confidence != null ? `${Math.round(row.confidence * 100)}%` : "—"}</td>
+              <td className="py-2 text-xs text-muted-foreground">{row.approved_at ? "approved" : row.confidence != null ? `${Math.round(row.confidence * 100)}%` : "—"}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <div className="mt-4 flex gap-2">
-        <button onClick={() => onSave(rows)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Approve mapping</button>
+        <button onClick={() => onSave(rows)} className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white">Approve mapping</button>
         <button onClick={onClose} className="rounded-xl border px-4 py-2 text-sm">Cancel</button>
       </div>
     </section>
@@ -348,23 +349,23 @@ function CsvTab({ say }: { say: Say }) {
 
   return (
     <div className="grid gap-6">
-      <form onSubmit={upload} className="grid gap-3 rounded-2xl border bg-white p-5 md:grid-cols-[1fr_260px_auto]">
+      <form onSubmit={upload} className="grid gap-3 ui-card p-5 md:grid-cols-[1fr_260px_auto]">
         <input aria-label="CSV file" type="file" accept=".csv,text/csv" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="rounded-xl border px-4 py-2.5" />
         <select aria-label="CSV connector" value={connectorId} onChange={(e) => setConnectorId(e.target.value)} className="rounded-xl border px-4 py-3">
           <option value="">New upload connector (per file)</option>
           {connectors.map((c) => <option key={c.id} value={c.id}>{c.display_name}</option>)}
         </select>
-        <button disabled={busy || !file} className="rounded-xl bg-slate-950 px-5 py-3 font-semibold text-white disabled:opacity-50">
+        <button disabled={busy || !file} className="rounded-xl bg-brand px-5 py-3 font-semibold text-white disabled:opacity-50">
           {busy ? "Uploading…" : "Upload & process"}
         </button>
-        <p className="text-xs text-slate-500 md:col-span-3">
+        <p className="text-xs text-muted-foreground md:col-span-3">
           Re-uploading the same file creates zero new leads. Pick an existing connector to reuse its approved field map; phone or email is required for each row.
         </p>
       </form>
 
       {result && (
-        <section className="rounded-2xl border bg-white p-5 text-sm">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Upload result</h2>
+        <section className="ui-card p-5 text-sm">
+          <h2 className="ui-kicker">Upload result</h2>
           <dl className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-6">
             {(
               [
@@ -376,24 +377,24 @@ function CsvTab({ say }: { say: Say }) {
                 ["Needs review", result.review],
               ] as const
             ).map(([k, v]) => (
-              <div key={k} className="rounded-xl bg-slate-50 p-3">
-                <dt className="text-xs uppercase text-slate-500">{k}</dt>
+              <div key={k} className="rounded-xl bg-muted/50 p-3">
+                <dt className="text-xs uppercase text-muted-foreground">{k}</dt>
                 <dd className="text-xl font-semibold">{v}</dd>
               </div>
             ))}
           </dl>
           {result.field_map_suggestions.length > 0 && (
             <>
-              <h3 className="mt-4 text-xs font-semibold uppercase text-slate-500">Detected columns</h3>
+              <h3 className="mt-4 text-xs font-semibold uppercase text-muted-foreground">Detected columns</h3>
               <ul className="mt-1 grid gap-1 sm:grid-cols-2">
                 {result.field_map_suggestions.map((s) => (
                   <li key={s.source_field} className="flex justify-between rounded-lg border px-3 py-1.5 text-xs">
                     <span className="font-mono">{s.source_field}</span>
-                    <span className="text-slate-600">→ {s.target_field ?? "unmapped"}{s.confidence != null ? ` (${Math.round(s.confidence * 100)}%)` : ""}</span>
+                    <span className="text-muted-foreground">→ {s.target_field ?? "unmapped"}{s.confidence != null ? ` (${Math.round(s.confidence * 100)}%)` : ""}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-slate-500">Adjust under Connectors → Field map for connector <span className="font-mono">{result.connector_id}</span>.</p>
+              <p className="mt-2 text-xs text-muted-foreground">Adjust under Connectors → Field map for connector <span className="font-mono">{result.connector_id}</span>.</p>
             </>
           )}
         </section>
@@ -434,32 +435,32 @@ function ReviewTab({ say }: { say: Say }) {
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between text-sm">
-        <label className="flex items-center gap-2 text-slate-600">
+        <label className="flex items-center gap-2 text-muted-foreground">
           <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} /> Show resolved
         </label>
-        <button onClick={retryAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold">Retry errored records</button>
+        <button onClick={retryAll} className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold">Retry errored records</button>
       </div>
-      {items.length === 0 && <p className="rounded-2xl border bg-white p-5 text-sm text-slate-500">Review queue is empty.</p>}
+      {items.length === 0 && <p className="ui-card p-5 text-sm text-muted-foreground">Review queue is empty.</p>}
       {items.map((item) => (
-        <article key={item.id} className="rounded-2xl border bg-white p-5 text-sm">
+        <article key={item.id} className="ui-card p-5 text-sm">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="font-medium text-red-700">{item.reason}</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium text-danger">{item.reason}</p>
+              <p className="text-xs text-muted-foreground">
                 raw {item.raw_record_id} · {item.record_status ?? "?"} · {relativeTime(item.created_at)}
                 {item.resolved_at ? ` · resolved ${relativeTime(item.resolved_at)}` : ""}
               </p>
             </div>
             {!item.resolved_at && (
               <div className="flex gap-1.5 text-xs">
-                <button onClick={() => resolve(item, "retry")} className="rounded-lg bg-slate-950 px-2.5 py-1 font-semibold text-white">Retry as-is</button>
+                <button onClick={() => resolve(item, "retry")} className="rounded-lg bg-brand px-2.5 py-1 font-semibold text-white">Retry as-is</button>
                 <button onClick={() => setEditing({ id: item.id, text: JSON.stringify(item.payload ?? {}, null, 2) })} className="rounded-lg border px-2.5 py-1">Fix & retry</button>
-                <button onClick={() => resolve(item, "discard")} className="rounded-lg border px-2.5 py-1 text-red-700">Discard</button>
+                <button onClick={() => resolve(item, "discard")} className="rounded-lg border px-2.5 py-1 text-danger">Discard</button>
               </div>
             )}
           </div>
           {item.suggested_fix && Object.keys(item.suggested_fix).length > 0 && (
-            <p className="mt-2 text-xs text-slate-600">Suggested: {JSON.stringify(item.suggested_fix)}</p>
+            <p className="mt-2 text-xs text-muted-foreground">Suggested: {JSON.stringify(item.suggested_fix)}</p>
           )}
           {editing?.id === item.id ? (
             <div className="mt-3 grid gap-2">
@@ -473,7 +474,7 @@ function ReviewTab({ say }: { say: Say }) {
                       say({ error: "Fixed payload must be valid JSON" }, "");
                     }
                   }}
-                  className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
                 >
                   Save & reprocess
                 </button>
@@ -481,7 +482,7 @@ function ReviewTab({ say }: { say: Say }) {
               </div>
             </div>
           ) : (
-            <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700">{JSON.stringify(item.payload ?? {}, null, 2)}</pre>
+            <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-muted/50 p-3 font-mono text-xs text-foreground/80">{JSON.stringify(item.payload ?? {}, null, 2)}</pre>
           )}
         </article>
       ))}
@@ -496,7 +497,7 @@ function HealthTab({ say }: { say: Say }) {
     adminApi.dataHealth().then((r) => (r.data ? setHealth(r.data) : say(r, "")));
   }, [say]);
 
-  if (!health) return <p role="status" className="text-sm text-slate-500">Loading…</p>;
+  if (!health) return <p role="status" className="text-sm text-muted-foreground">Loading…</p>;
 
   const stages = ["landed", "mapped", "cleaned", "validated", "merged", "enriched", "published", "review", "error"];
 
@@ -504,18 +505,18 @@ function HealthTab({ say }: { say: Say }) {
     <div className="grid gap-6">
       <div className="grid grid-cols-3 gap-3 md:grid-cols-9">
         {stages.map((s) => (
-          <div key={s} className={`rounded-xl border bg-white p-3 ${s === "error" && health.totals[s] ? "border-red-300" : ""}`}>
-            <p className="text-[10px] uppercase tracking-wide text-slate-500">{s}</p>
+          <div key={s} className={`rounded-xl border border-border bg-card p-3 ${s === "error" && health.totals[s] ? "border-red-300" : ""}`}>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s}</p>
             <p className="text-xl font-semibold">{health.totals[s] ?? 0}</p>
           </div>
         ))}
       </div>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-muted-foreground">
         {health.review_open} open review items · {health.events_total} lead events emitted
       </p>
-      <div className="overflow-hidden rounded-2xl border bg-white">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-100">
+          <thead className="bg-muted">
             <tr>
               <th className="p-3">Connector</th>
               <th className="p-3">Status</th>
@@ -528,23 +529,23 @@ function HealthTab({ say }: { say: Say }) {
             </tr>
           </thead>
           <tbody>
-            {health.connectors.length === 0 && <tr><td colSpan={8} className="p-4 text-slate-500">No connectors.</td></tr>}
+            {health.connectors.length === 0 && <tr><td colSpan={8} className="p-4 text-muted-foreground">No connectors.</td></tr>}
             {health.connectors.map((c) => (
               <tr key={c.connector_id} className="border-t">
                 <td className="p-3">
                   <p className="font-medium">{c.display_name ?? c.type}</p>
-                  <p className="text-xs text-slate-500">{c.type}</p>
+                  <p className="text-xs text-muted-foreground">{c.type}</p>
                 </td>
                 <td className="p-3 capitalize">
                   {c.status}
-                  {c.consecutive_failures > 0 && <span className="ml-1 text-xs text-red-600">({c.consecutive_failures}×)</span>}
+                  {c.consecutive_failures > 0 && <span className="ml-1 text-xs text-danger">({c.consecutive_failures}×)</span>}
                 </td>
                 <td className="p-3">{c.records}</td>
                 <td className="p-3">{c.published}</td>
                 <td className="p-3">{c.review}</td>
-                <td className={`p-3 ${c.error ? "text-red-700" : ""}`}>{c.error}</td>
+                <td className={`p-3 ${c.error ? "text-danger" : ""}`}>{c.error}</td>
                 <td className="p-3">{c.publish_rate == null ? "—" : `${Math.round(c.publish_rate * 100)}%`}</td>
-                <td className="p-3 text-xs text-slate-600">{relativeTime(c.last_success_at)}</td>
+                <td className="p-3 text-xs text-muted-foreground">{relativeTime(c.last_success_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -569,12 +570,12 @@ function TurnStatsCard({ title, stats }: { title: string; stats: TurnStats }) {
     ["LLM fallbacks", String(stats.llm_fallbacks)],
   ];
   return (
-    <div className="rounded-2xl border bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <h3 className="text-sm font-semibold text-foreground/80">{title}</h3>
       <dl className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
         {cells.map(([k, v]) => (
           <div key={k}>
-            <dt className="text-[10px] uppercase tracking-wide text-slate-500">{k}</dt>
+            <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{k}</dt>
             <dd className="text-lg font-semibold">{v}</dd>
           </div>
         ))}
@@ -593,13 +594,13 @@ function OpsTab({ say }: { say: Say }) {
     return () => clearInterval(timer);
   }, [say]);
 
-  if (!ops) return <p role="status" className="text-sm text-slate-500">Loading…</p>;
+  if (!ops) return <p role="status" className="text-sm text-muted-foreground">Loading…</p>;
 
   return (
     <div className="grid gap-6">
       <section aria-label="Active alerts">
         {ops.alerts.length === 0 ? (
-          <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
+          <p className="rounded-xl bg-success-soft p-3 text-sm text-success">
             No active alerts. {ops.llm_configured ? "" : "No LLM provider configured — template replies are expected, so the fallback-rate alert is disabled."}
           </p>
         ) : (
@@ -608,7 +609,7 @@ function OpsTab({ say }: { say: Say }) {
               <li
                 key={a.code}
                 role="alert"
-                className={`rounded-xl border p-3 text-sm ${a.severity === "critical" ? "border-red-300 bg-red-50 text-red-800" : "border-amber-300 bg-amber-50 text-amber-800"}`}
+                className={`rounded-xl border p-3 text-sm ${a.severity === "critical" ? "border-red-300 bg-danger-soft text-red-800" : "border-amber-300 bg-warning-soft text-warning"}`}
               >
                 <span className="font-semibold uppercase">{a.severity}</span> · {a.message}
               </li>
@@ -621,13 +622,13 @@ function OpsTab({ say }: { say: Say }) {
       <TurnStatsCard title="Last 1,000 turns" stats={ops.recent_1000} />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-700">Consumers</h3>
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <h3 className="text-sm font-semibold text-foreground/80">Consumers</h3>
           <table className="mt-2 w-full text-left text-sm">
-            <thead className="text-xs text-slate-500"><tr><th className="py-1">Consumer</th><th className="py-1">Pending</th><th className="py-1">Lag</th></tr></thead>
+            <thead className="text-xs text-muted-foreground"><tr><th className="py-1">Consumer</th><th className="py-1">Pending</th><th className="py-1">Lag</th></tr></thead>
             <tbody>
               {Object.entries(ops.consumers).map(([name, c]) => (
-                <tr key={name} className={`border-t ${c.lag_s > ops.thresholds.consumer_lag_s ? "text-red-700" : ""}`}>
+                <tr key={name} className={`border-t ${c.lag_s > ops.thresholds.consumer_lag_s ? "text-danger" : ""}`}>
                   <td className="py-2">{name}</td>
                   <td className="py-2">{c.pending}</td>
                   <td className="py-2">{c.lag_s}s</td>
@@ -635,21 +636,21 @@ function OpsTab({ say }: { say: Say }) {
               ))}
             </tbody>
           </table>
-          <p className="mt-3 text-sm text-slate-600">
-            Review queue: <span className={ops.review_open > ops.thresholds.review_queue ? "font-semibold text-red-700" : "font-semibold"}>{ops.review_open}</span> open
+          <p className="mt-3 text-sm text-muted-foreground">
+            Review queue: <span className={ops.review_open > ops.thresholds.review_queue ? "font-semibold text-danger" : "font-semibold"}>{ops.review_open}</span> open
           </p>
         </div>
-        <div className="rounded-2xl border bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-700">Connectors</h3>
-          {ops.connectors.length === 0 && <p className="mt-2 text-sm text-slate-500">No connectors.</p>}
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <h3 className="text-sm font-semibold text-foreground/80">Connectors</h3>
+          {ops.connectors.length === 0 && <p className="mt-2 text-sm text-muted-foreground">No connectors.</p>}
           <ul className="mt-2 grid gap-2 text-sm">
             {ops.connectors.map((c) => (
               <li key={c.connector_id} className="flex items-center justify-between border-t pt-2">
                 <span>
                   <span className="font-medium">{c.display_name ?? c.type}</span>
-                  <span className="ml-2 text-xs capitalize text-slate-500">{c.status}</span>
+                  <span className="ml-2 text-xs capitalize text-muted-foreground">{c.status}</span>
                 </span>
-                <span className={c.consecutive_failures >= ops.thresholds.connector_failures ? "text-red-700" : "text-slate-600"}>
+                <span className={c.consecutive_failures >= ops.thresholds.connector_failures ? "text-danger" : "text-muted-foreground"}>
                   {c.consecutive_failures} failures · {relativeTime(c.last_success_at)}
                 </span>
               </li>
@@ -658,7 +659,7 @@ function OpsTab({ say }: { say: Say }) {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Thresholds: fallback &gt; {pct(ops.thresholds.fallback_rate)} / {ops.window_minutes} min · consumer lag &gt; {ops.thresholds.consumer_lag_s}s ·
         connector ≥ {ops.thresholds.connector_failures} consecutive failures · review queue &gt; {ops.thresholds.review_queue}. Generated {relativeTime(ops.generated_at)}.
       </p>

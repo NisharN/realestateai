@@ -224,23 +224,23 @@ export function VoiceModal({
         initial={{ scale: 0.9, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.9, y: 20 }}
-        className="bg-card rounded-3xl p-8 w-full max-w-md text-center relative"
+        className="bg-card rounded-3xl p-8 w-full max-w-md text-center relative shadow-pop border border-border"
       >
         <button type="button" aria-label={t.close} onClick={onClose} className="absolute top-4 end-4 p-2 text-muted-foreground hover:text-foreground">
           <X className="w-5 h-5" />
         </button>
 
         <div className="mb-6">
-          <div className="w-20 h-20 mx-auto mb-4 bg-brand-gradient rounded-full flex items-center justify-center">
-            <Bot className="w-10 h-10 text-brand-foreground" />
+          <div className="w-20 h-20 mx-auto mb-4 bg-brand rounded-full flex items-center justify-center shadow-card">
+            <Bot className="w-10 h-10 text-gold" />
           </div>
-          <h2 className="text-xl font-bold text-foreground">{t.voiceTitle}</h2>
+          <h2 className="text-xl font-semibold text-foreground">{t.voiceTitle}</h2>
           <p className="text-muted-foreground text-sm mt-1" aria-live="polite">
             {statusText}
           </p>
         </div>
 
-        <canvas ref={canvasRef} width={300} height={80} className="mx-auto mb-6 rounded-xl bg-surface" />
+        <canvas ref={canvasRef} width={300} height={80} className="mx-auto mb-6 rounded-xl bg-muted" />
 
         {transcript && (
           <div className="mb-4 p-3 bg-surface rounded-xl text-start">
@@ -280,7 +280,7 @@ export function VoiceModal({
           aria-label={t.voice}
           className={cn(
             "w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg mx-auto",
-            recording ? "bg-red-500 hover:bg-red-600 shadow-red-200" : "bg-brand hover:opacity-90 shadow-brand/30",
+            recording ? "bg-danger hover:brightness-110 shadow-danger/30 ring-4 ring-danger/20" : "bg-brand hover:bg-brand-2 shadow-brand/30",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >

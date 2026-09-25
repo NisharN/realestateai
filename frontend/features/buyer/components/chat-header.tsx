@@ -18,17 +18,17 @@ export function ChatHeader({
   onVoice: () => void;
 }) {
   return (
-    <header className="bg-card border-b border-border px-6 py-3 flex items-center justify-between">
+    <header className="bg-card/80 backdrop-blur border-b border-border px-6 h-16 flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="relative">
-          <div className="w-10 h-10 bg-brand-gradient rounded-full flex items-center justify-center">
-            <Bot className="w-5 h-5 text-brand-foreground" />
+          <div className="w-10 h-10 bg-brand rounded-full flex items-center justify-center shadow-card">
+            <Bot className="w-5 h-5 text-gold" />
           </div>
           <div className="absolute -bottom-0.5 -end-0.5 w-3 h-3 bg-success border-2 border-card rounded-full" />
         </div>
-        <div>
+        <div className="leading-tight">
           <h2 className="font-semibold text-foreground">{t.assistant}</h2>
-          <p className="text-xs text-green-700" dir="ltr">
+          <p className="text-xs text-success" dir="ltr">
             {leadId ? `${t.lead} ${leadId.slice(0, 8)}…` : t.online}
           </p>
         </div>
@@ -40,11 +40,11 @@ export function ChatHeader({
           onClick={onToggleLanguage}
           lang={language === "en" ? "ar" : "en"}
           aria-label="Switch language / تغيير اللغة"
-          className="px-3 py-1.5 text-sm text-muted-foreground hover:bg-surface rounded-lg transition"
+          className="ui-btn-secondary ui-btn-sm"
         >
           {t.switchLanguage}
         </button>
-        <button type="button" onClick={onVoice} aria-label={t.voice} className="lg:hidden p-2 text-muted-foreground hover:bg-surface rounded-lg transition">
+        <button type="button" onClick={onVoice} aria-label={t.voice} className="lg:hidden ui-btn-ghost p-2">
           <Mic className="w-5 h-5" />
         </button>
       </div>

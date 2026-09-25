@@ -32,7 +32,7 @@ export function BuyerChat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] bg-surface" dir={dirFor(chat.language)} lang={chat.language}>
+    <div className="flex h-screen bg-canvas" dir={dirFor(chat.language)} lang={chat.language}>
       <Sidebar t={chat.t} needsHuman={chat.needsHuman} onSend={chat.sendMessage} onVoice={() => setShowVoice(true)} />
 
       <main className="flex-1 flex flex-col min-w-0">

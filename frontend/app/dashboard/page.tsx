@@ -91,12 +91,12 @@ function formatBudget(lead: ApiLead): string {
 // These must match the statuses the backend actually stores (see
 // api/leads.py list_leads) — otherwise a lead renders with a blank status pill.
 const STATUS_COLORS: Record<string, string> = {
-  new: "bg-gray-100 text-gray-700",
+  new: "bg-muted text-foreground/80",
   contacted: "bg-yellow-100 text-yellow-700",
-  qualified: "bg-blue-100 text-blue-700",
+  qualified: "bg-brand/10 text-brand",
   nurture: "bg-purple-100 text-purple-600",
-  closed: "bg-green-100 text-green-700",
-  lost: "bg-red-100 text-red-700",
+  closed: "bg-success-soft text-success",
+  lost: "bg-danger-soft text-danger",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -114,15 +114,15 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
+      className="bg-card rounded-2xl p-6 border border-border shadow-card"
     >
       <div className="flex items-center justify-between mb-4">
-        <div className="p-2 bg-blue-50 rounded-xl">
-          <Icon className="w-5 h-5 text-blue-600" />
+        <div className="p-2 bg-brand/5 rounded-xl">
+          <Icon className="w-5 h-5 text-brand" />
         </div>
         <div
           className={`flex items-center gap-1 text-xs font-medium ${
-            stat.trend === "up" ? "text-green-600" : "text-red-600"
+            stat.trend === "up" ? "text-success" : "text-danger"
           }`}
         >
           {stat.trend === "up" ? (
@@ -133,8 +133,8 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
           {stat.change}
         </div>
       </div>
-      <h3 className="text-2xl font-bold text-gray-900">{stat.value}</h3>
-      <p className="text-sm text-gray-500 mt-1">{stat.title}</p>
+      <h3 className="text-2xl font-bold text-foreground">{stat.value}</h3>
+      <p className="text-sm text-muted-foreground mt-1">{stat.title}</p>
     </motion.div>
   );
 }
@@ -172,9 +172,9 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function LoadingPanel({ label }: { label: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
-      <div className="inline-block w-6 h-6 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin mb-3" />
-      <p className="text-sm text-gray-500">{label}</p>
+    <div className="bg-card rounded-2xl border border-border shadow-card p-12 text-center">
+      <div className="inline-block w-6 h-6 border-2 border-border border-t-blue-600 rounded-full animate-spin mb-3" />
+      <p className="text-sm text-muted-foreground">{label}</p>
     </div>
   );
 }
@@ -193,19 +193,19 @@ function PipelineBoard({ leads }: { leads: Lead[] }) {
   ];
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="p-6 border-b border-gray-100">
-        <h2 className="text-lg font-semibold text-gray-900">Pipeline Board</h2>
+    <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
+      <div className="p-6 border-b border-border">
+        <h2 className="text-lg font-semibold text-foreground">Pipeline Board</h2>
       </div>
       <div className="overflow-x-auto">
         <div className="flex gap-4 p-6 min-w-max">
           {columns.map((col) => (
             <div key={col.id} className="w-72 flex-shrink-0">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-700">
+                <h3 className="text-sm font-medium text-foreground/80">
                   {col.label}
                 </h3>
-                <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                <span className="px-2 py-0.5 bg-muted text-muted-foreground text-xs rounded-full">
                   {leads.filter((l) => l.status === col.id).length}
                 </span>
               </div>
@@ -214,31 +214,31 @@ function PipelineBoard({ leads }: { leads: Lead[] }) {
                   <motion.div
                     key={lead.id}
                     whileHover={{ scale: 1.02 }}
-                    className="p-3 bg-gray-50 rounded-xl border border-gray-100 cursor-pointer hover:shadow-md transition"
+                    className="p-3 bg-muted/50 rounded-xl border border-border cursor-pointer hover:shadow-md transition"
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-900">
+                      <span className="text-sm font-medium text-foreground">
                         {lead.name}
                       </span>
                       <span
                         className={`px-2 py-0.5 text-xs rounded-full ${
                           lead.intent_score >= 80
-                            ? "bg-green-100 text-green-700"
+                            ? "bg-success-soft text-success"
                             : lead.intent_score >= 50
                             ? "bg-yellow-100 text-yellow-700"
-                            : "bg-gray-100 text-gray-600"
+                            : "bg-muted text-muted-foreground"
                         }`}
                       >
                         {lead.intent_score}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                       <MapPin className="w-3 h-3" />
                       {lead.area}
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">{lead.budget}</span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-muted-foreground">{lead.budget}</span>
+                      <span className="text-xs text-muted-foreground/70">
                         {lead.assigned_broker || "Unassigned"}
                       </span>
                     </div>
@@ -268,25 +268,25 @@ function LeadsTable({ leads }: { leads: Lead[] }) {
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="p-6 border-b border-gray-100">
+    <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">All Leads</h2>
+          <h2 className="text-lg font-semibold text-foreground">All Leads</h2>
           <div className="flex items-center gap-3">
             <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/70" />
               <input
                 type="text"
                 placeholder="Search leads..."
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-64"
+                className="pl-9 pr-4 py-2 bg-muted rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/20 w-64"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none"
+              className="px-3 py-2 bg-muted rounded-xl text-sm focus:outline-none"
             >
               <option value="all">All Status</option>
               {Object.entries(STATUS_LABELS).map(([key, label]) => (
@@ -302,29 +302,29 @@ function LeadsTable({ leads }: { leads: Lead[] }) {
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-gray-100">
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+            <tr className="border-b border-border">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Lead
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Status
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Score
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Source
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Area
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Budget
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Broker
               </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
+              <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase">
                 Date
               </th>
               <th className="px-6 py-3"></th>
@@ -334,14 +334,14 @@ function LeadsTable({ leads }: { leads: Lead[] }) {
             {filtered.map((lead) => (
               <tr
                 key={lead.id}
-                className="border-b border-gray-50 hover:bg-gray-50/50 transition"
+                className="border-b border-gray-50 hover:bg-muted/50/50 transition"
               >
                 <td className="px-6 py-4">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">
+                    <p className="text-sm font-medium text-foreground">
                       {lead.name}
                     </p>
-                    <p className="text-xs text-gray-500">{lead.email}</p>
+                    <p className="text-xs text-muted-foreground">{lead.email}</p>
                   </div>
                 </td>
                 <td className="px-6 py-4">
@@ -355,49 +355,49 @@ function LeadsTable({ leads }: { leads: Lead[] }) {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-16 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full ${
                           lead.intent_score >= 80
                             ? "bg-green-500"
                             : lead.intent_score >= 50
                             ? "bg-yellow-500"
-                            : "bg-gray-400"
+                            : "bg-muted-foreground"
                         }`}
                         style={{ width: `${lead.intent_score}%` }}
                       />
                     </div>
-                    <span className="text-xs text-gray-600">
+                    <span className="text-xs text-muted-foreground">
                       {lead.intent_score}
                     </span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-600 capitalize">
+                  <span className="text-sm text-muted-foreground capitalize">
                     {lead.source}
                   </span>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-600">{lead.area}</span>
+                  <span className="text-sm text-muted-foreground">{lead.area}</span>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-600">{lead.budget}</span>
+                  <span className="text-sm text-muted-foreground">{lead.budget}</span>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-muted-foreground">
                     {lead.assigned_broker || (
                       <span className="text-orange-500 text-xs">Unassigned</span>
                     )}
                   </span>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-muted-foreground">
                     {new Date(lead.created_at).toLocaleDateString()}
                   </span>
                 </td>
                 <td className="px-6 py-4">
-                  <button className="p-1 hover:bg-gray-100 rounded-lg transition">
-                    <MoreHorizontal className="w-4 h-4 text-gray-400" />
+                  <button className="p-1 hover:bg-muted rounded-lg transition">
+                    <MoreHorizontal className="w-4 h-4 text-muted-foreground/70" />
                   </button>
                 </td>
               </tr>
@@ -455,85 +455,45 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-14 h-[calc(100vh-3.5rem)] w-64 bg-white border-r border-gray-200 z-10">
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-              <LayoutDashboard className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="font-bold text-gray-900">Dubai RE AI</h1>
-              <p className="text-xs text-gray-500">Broker Dashboard</p>
-            </div>
-          </div>
-
-          <nav className="space-y-1">
-            {[
-              { id: "overview", label: "Overview", icon: LayoutDashboard },
-              { id: "pipeline", label: "Pipeline", icon: TrendingUp },
-              { id: "leads", label: "All Leads", icon: Users },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id as any)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
-                    activeTab === item.id
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-gray-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
-              <Users className="w-5 h-5 text-gray-500" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-900">Sarah Johnson</p>
-              <p className="text-xs text-gray-500">Senior Broker</p>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="ml-64 p-8">
+    <div className="px-5 py-8 lg:px-10">
+      <main>
         <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {activeTab === "overview" && "Dashboard Overview"}
-                {activeTab === "pipeline" && "Pipeline Board"}
-                {activeTab === "leads" && "Lead Management"}
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                {new Date().toLocaleDateString("en-US", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
+              <p className="ui-kicker">
+                {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
               </p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+                {activeTab === "overview" && "Dashboard overview"}
+                {activeTab === "pipeline" && "Pipeline board"}
+                {activeTab === "leads" && "Lead management"}
+              </h1>
             </div>
-            <div className="flex items-center gap-3">
-              <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50 transition">
-                Export
-              </button>
-              <button className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition">
-                + New Lead
-              </button>
+            <div className="inline-flex rounded-xl border border-border bg-card p-1 shadow-card" role="tablist">
+              {(
+                [
+                  { id: "overview", label: "Overview", icon: LayoutDashboard },
+                  { id: "pipeline", label: "Pipeline", icon: TrendingUp },
+                  { id: "leads", label: "All leads", icon: Users },
+                ] as const
+              ).map((item) => {
+                const Icon = item.icon;
+                const active = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition ${
+                      active ? "bg-brand text-white shadow-card" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {item.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -542,7 +502,7 @@ export default function DashboardPage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 {summaryError && (
-                  <div role="alert" className="md:col-span-2 lg:col-span-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">
+                  <div role="alert" className="md:col-span-2 lg:col-span-4 rounded-xl bg-danger-soft p-4 text-sm text-danger">
                     {summaryError}
                   </div>
                 )}
@@ -553,8 +513,8 @@ export default function DashboardPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 {/* Recent Activity */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                <div className="bg-card rounded-2xl border border-border shadow-card p-6">
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
                     Recent Activity
                   </h2>
                   <div className="space-y-4">
@@ -587,18 +547,18 @@ export default function DashboardPage() {
                       const Icon = activity.icon;
                       return (
                         <div key={i} className="flex items-start gap-3">
-                          <div className="p-2 bg-blue-50 rounded-lg">
-                            <Icon className="w-4 h-4 text-blue-600" />
+                          <div className="p-2 bg-brand/5 rounded-lg">
+                            <Icon className="w-4 h-4 text-brand" />
                           </div>
                           <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-foreground">
                               {activity.action}
                             </p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-muted-foreground">
                               {activity.detail}
                             </p>
                           </div>
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-muted-foreground/70">
                             {activity.time}
                           </span>
                         </div>
@@ -608,22 +568,22 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Lead Sources */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                <div className="bg-card rounded-2xl border border-border shadow-card p-6">
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
                     Lead Sources
                   </h2>
                   <div className="space-y-4">
                     {leadSourceBreakdown(leads).map((item) => (
                       <div key={item.source}>
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm text-gray-700">
+                          <span className="text-sm text-foreground/80">
                             {item.source}
                           </span>
-                          <span className="text-sm text-gray-500">
+                          <span className="text-sm text-muted-foreground">
                             {item.count} ({item.percentage}%)
                           </span>
                         </div>
-                        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                           <div
                             className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all"
                             style={{ width: `${item.percentage}%` }}
@@ -638,7 +598,7 @@ export default function DashboardPage() {
           )}
 
           {leadsError && activeTab !== "overview" && (
-            <div className="mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+            <div className="mb-4 px-4 py-3 rounded-xl bg-warning-soft border border-warning/20 text-sm text-warning">
               {leadsError}
             </div>
           )}

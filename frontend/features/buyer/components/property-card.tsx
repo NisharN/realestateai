@@ -36,7 +36,7 @@ export function PropertyCard({
     <motion.article
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-card rounded-2xl shadow-lg overflow-hidden border border-border max-w-md"
+      className="bg-card rounded-2xl shadow-card hover:shadow-card-hover overflow-hidden border border-border max-w-md transition"
       data-testid="property-card"
     >
       <div className="relative h-48 bg-muted">
@@ -61,14 +61,14 @@ export function PropertyCard({
           <Heart className={cn("w-4 h-4", isLiked ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
         </button>
         {property.match_score != null && (
-          <div className="absolute top-3 start-3 px-2 py-1 bg-success text-brand-foreground text-xs font-semibold rounded-full">
+          <div className="absolute top-3 start-3 px-2.5 py-1 bg-ink/80 backdrop-blur text-gold text-xs font-semibold rounded-full tabular">
             {property.match_score}% {t.match}
           </div>
         )}
       </div>
 
       <div className="p-4">
-        <h3 className="font-semibold text-foreground text-sm mb-1">{property.title}</h3>
+        <h3 className="font-semibold text-foreground text-[15px] leading-snug mb-1">{property.title}</h3>
         <div className="flex items-center gap-1 text-muted-foreground text-xs mb-3">
           <MapPin className="w-3 h-3" />
           {property.area}
@@ -109,7 +109,7 @@ export function PropertyCard({
         )}
 
         <div className="flex items-center justify-between">
-          <span className="text-lg font-bold text-foreground">{fmtAED(property.price, lang)}</span>
+          <span className="text-lg font-semibold text-foreground tabular">{fmtAED(property.price, lang)}</span>
           <div className="flex gap-2">
             <button
               type="button"
@@ -124,7 +124,7 @@ export function PropertyCard({
               type="button"
               disabled={busy}
               onClick={() => void onAsk(t.askAboutText(property.title), property.id)}
-              className="px-3 py-1.5 bg-brand text-brand-foreground text-xs font-medium rounded-lg hover:opacity-90 transition disabled:opacity-40"
+              className="px-3 py-1.5 bg-brand text-brand-foreground text-xs font-medium rounded-lg hover:bg-brand-2 transition disabled:opacity-40"
             >
               {t.askAbout}
             </button>

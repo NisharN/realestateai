@@ -7,6 +7,7 @@ export interface NavigationItem {
     | "chat"
     | "dashboard"
     | "broker"
+    | "pipeline"
     | "ingestion"
     | "properties"
     | "market"
@@ -29,6 +30,7 @@ const common: NavigationItem[] = [
   { href: "/", label: "Chat", icon: "chat" },
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { href: "/broker", label: "Today", icon: "broker" },
+  { href: "/broker/pipeline", label: "Pipeline", icon: "pipeline" },
   { href: "/properties", label: "Properties", icon: "properties" },
   { href: "/market", label: "Market", icon: "market" },
   { href: "/automations", label: "Automations", icon: "automations" },
