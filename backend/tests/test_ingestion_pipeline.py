@@ -398,3 +398,83 @@ def test_connector_patch_validates_crm_url():
     r = client.patch(f"/api/v1/admin/connectors/{created['id']}", json={"config": {"url": "https://192.168.1.1/leads"}})
     assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_crm_url"
     assert client.get(f"/api/v1/admin/connectors/{created['id']}").json()["config"]["url"] == "https://crm.test/leads"
+
+
+# -- CRM write-back consumer -------------------------------------------------
+
+async def test_crm_writeback_patches_crm_once_per_event():
+    from app.modules.ingestion.writeback import run_writeback
+
+    patches: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": "crm-9", "Mobile": "0507777777", "Name": "Wb Lead"}])
+        patches.append((str(request.url), json.loads(request.content)))
+        return httpx.Response(200, json={"ok": True})
+
+    created = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "tok", "config": {"url": "https://crm.test/leads", "write_back_url": "https://crm.test/leads/{id}", "write_back_fields": ["score", "stage", "secret_col"]}}).json()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        res = await poll_connector(created["id"], workspace_id=WS, client=http)
+        outcomes = await process_many(res["raw_ids"], workspace_id=WS)
+        assert outcomes[0].status == "published"
+        lead_id = outcomes[0].lead_id
+        await table("lead_events", WS).insert({"lead_id": lead_id, "type": "lead.updated", "payload": {"by": "test"}})
+        assert await run_writeback(WS, client=http) >= 1
+        again = await run_writeback(WS, client=http)
+    assert len(patches) == 1 and patches[0][0] == "https://crm.test/leads/crm-9"
+    assert set(patches[0][1]) <= {"score", "stage"} and "secret_col" not in patches[0][1]
+    assert again == 0  # offsets: redelivery is a no-op
+
+
+async def test_crm_writeback_skips_leads_without_writeback_connector():
+    from app.modules.ingestion.writeback import run_writeback
+
+    lead = await get_lead_repository(WS).create({"name": "Manual", "phone": "+971501230000", "source": "website"})
+    await table("lead_events", WS).insert({"lead_id": lead["id"], "type": "lead.updated", "payload": {}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as http:
+        assert await run_writeback(WS, client=http) == 1  # consumed, nothing sent, no error
+
+
+async def test_crm_writeback_routes_each_crm_its_own_external_id():
+    from app.modules.ingestion.writeback import run_writeback
+
+    patches: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if request.method == "GET":
+            ext = "a-1" if host == "crm-a.test" else "b-2"
+            return httpx.Response(200, json=[{"id": ext, "Mobile": "0507777777", "Name": "Same Person"}])
+        patches.append(str(request.url))
+        return httpx.Response(200, json={})
+
+    ids = []
+    for host in ("crm-a.test", "crm-b.test"):
+        cfg = {"url": f"https://{host}/leads", "write_back_url": f"https://{host}/leads/{{id}}"}
+        ids.append(client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "tok", "config": cfg}).json()["id"])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        lead_ids = set()
+        for cid in ids:
+            res = await poll_connector(cid, workspace_id=WS, client=http)
+            lead_ids |= {o.lead_id for o in await process_many(res["raw_ids"], workspace_id=WS)}
+        assert len(lead_ids) == 1  # merged on phone
+        await table("lead_events", WS).insert({"lead_id": lead_ids.pop(), "type": "lead.scored", "payload": {}})
+        await run_writeback(WS, client=http)
+    assert set(patches) == {"https://crm-a.test/leads/a-1", "https://crm-b.test/leads/b-2"}
+
+
+async def test_pending_events_are_not_capped_by_processed_prefix():
+    lead = await get_lead_repository(WS).create({"name": "Many", "phone": "+971501239999", "source": "website"})
+    seen: list[str] = []
+
+    async def handler(event):
+        seen.append(event["id"])
+
+    for _ in range(450):
+        await events.emit(lead["id"], "lead.updated", {}, workspace_id=WS)
+    while await events.consume(WS, "t", handler, limit=100):
+        pass
+    await events.emit(lead["id"], "lead.updated", {"n": 451}, workspace_id=WS)
+    assert await events.consume(WS, "t", handler, limit=100) == 1
+    assert len(seen) == 451 and len(set(seen)) == 451

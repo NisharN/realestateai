@@ -13,7 +13,9 @@ clarify_budget:
 clarify_area:
   - "I want to make sure I look in the right place — which community did you mean? For example Dubai Marina, Downtown, JVC or Dubai Hills."
 answer_area:
+  - "{area_name} is {area_summary} It is {area_travel_text}, and typical prices are around AED {area_price_psf} per sq ft. Shall I show you options there?"
   - "{area_name} is {area_summary} Typical prices are around AED {area_price_psf} per sq ft. Shall I show you options there?"
+  - "{area_name} is {area_summary} It is {area_travel_text}. Shall I show you options there?"
   - "{area_name} is a popular choice. Would you like me to pull some listings there so you can see what your budget gets you?"
 answer_property:
   - "{property_title} in {property_area}: {property_bedrooms} bedroom {property_type}, {property_size} sq ft, listed at AED {property_price}. Would you like to see it?"
@@ -51,6 +53,8 @@ ask_reaction:
   - "Noted, thank you. Do any of the options I showed you look interesting, or should I adjust the search?"
 after_handoff:
   - "Thanks — {broker_name} has your details and will be in touch shortly. If anything changes, just let me know."
+confirm_transcript:
+  - "Did you say: {transcript}? Say yes, or repeat it."
 stt_failed:
   - "Sorry, I couldn't hear that clearly. Could you say it again, or type your message?"
 error_fallback:

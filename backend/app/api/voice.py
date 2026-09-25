@@ -1,9 +1,18 @@
-"""Voice conversation API routes.
+"""Voice conversation API routes (architecture §11).
 
-The WebSocket shares the turn engine with chat/WhatsApp. Per-turn failures
-(STT, engine, TTS) send a fallback reply and keep the socket open; the client
-always receives ``reply`` text and may receive ``audio`` (real WAV) — when
-``audio`` is absent the client should use browser speech synthesis.
+The WebSocket is only a different input/output around the shared turn engine.
+Per-turn failures (STT, engine, TTS) send a template reply and keep the socket
+open. Protocol (client → server):
+
+    {type: audio, data: <b64>, turn_id?}     one utterance (VAD/PTT end)
+    {type: text, text, turn_id?}             typed fallback
+    {type: interrupt}                        barge-in: cancel the in-flight turn
+    {type: ping|pong}
+
+Server → client: ``ready`` (with ``history`` when resuming a ``session_id``),
+``transcript``, ``thinking`` (turn > 1.2 s), ``reply`` (+ optional WAV
+``audio``; when absent the browser speaks ``spoken_text``), ``cancelled``,
+``error``, ``ping``.
 """
 from __future__ import annotations
 
@@ -12,6 +21,7 @@ import base64
 import io
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
@@ -20,15 +30,20 @@ from app.auth import AuthBackend, RequestContext, get_auth_backend, get_request_
 from app.database import get_lead_repository
 from app.modules.conversation import templates
 from app.modules.conversation.engine import handle_turn
+from app.modules.conversation.repository import ConversationRepo
+from app.modules.voice.speakify import speakify
 from app.services.voice_service import VoiceService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 HEARTBEAT_S = 20.0
+THINKING_AFTER_S = 1.2
+LOW_CONFIDENCE = 0.6
+YES_WORDS = {"yes", "yeah", "yep", "correct", "right", "نعم", "ايوه", "أيوه", "صح"}
 
 
-async def _send(ws: WebSocket, payload: dict) -> bool:
+async def _send(ws: WebSocket, payload: dict[str, Any]) -> bool:
     try:
         await ws.send_json(payload)
         return True
@@ -37,12 +52,127 @@ async def _send(ws: WebSocket, payload: dict) -> bool:
         return False
 
 
+class VoiceSession:
+    """One socket: serialises turns, supports barge-in and resume."""
+
+    def __init__(self, ws: WebSocket, lead_id: str, workspace_id: str, language: str, voice: VoiceService) -> None:
+        self.ws = ws
+        self.lead_id = lead_id
+        self.workspace_id = workspace_id
+        self.language = language
+        self.voice = voice
+        self.current: asyncio.Task[None] | None = None
+        self.pending_confirm: str | None = None  # low-confidence transcript awaiting "yes"
+
+    async def interrupt(self) -> None:
+        task = self.current
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    def start_turn(self, message: dict[str, Any]) -> None:
+        self.current = asyncio.create_task(self._turn(message))
+
+    async def _turn(self, message: dict[str, Any]) -> None:
+        kind = message.get("type")
+        turn_id = str(message.get("turn_id") or uuid.uuid4().hex)
+        user_text = ""
+        stt_error: str | None = None
+        confidence: float | None = None
+        try:
+            if kind == "audio":
+                audio = base64.b64decode(message.get("data") or "")
+                transcript = await self.voice.transcribe(audio, self.language)
+                if transcript.ok:
+                    user_text, confidence = transcript.text, transcript.confidence
+                else:
+                    stt_error = transcript.error or "stt_failed"
+            else:
+                user_text = str(message.get("text") or "").strip()
+
+            if not user_text:
+                await self._reply_template(turn_id, "stt_failed", "", stt_error=stt_error, fallbacks=["stt"])
+                return
+
+            await _send(self.ws, {"type": "transcript", "turn_id": turn_id, "text": user_text, "confidence": confidence})
+
+            # Low-confidence STT: repeat back once; "yes" accepts, anything else replaces it.
+            if self.pending_confirm is not None:
+                if user_text.strip().lower().rstrip(".!") in YES_WORDS:
+                    user_text = self.pending_confirm
+                self.pending_confirm = None
+            elif kind == "audio" and confidence is not None and confidence < LOW_CONFIDENCE:
+                self.pending_confirm = user_text
+                await self._reply_template(turn_id, "confirm_transcript", user_text, transcript=user_text, fallbacks=["stt:low_confidence"])
+                return
+
+            thinking = asyncio.create_task(self._thinking(turn_id))
+            try:
+                result = await handle_turn(
+                    self.lead_id,
+                    user_text,
+                    workspace_id=self.workspace_id,
+                    channel="voice",
+                    idempotency_key=f"voice:{turn_id}",
+                )
+            finally:
+                thinking.cancel()
+            self.language = result.language or self.language
+            payload: dict[str, Any] = {
+                "type": "reply",
+                "turn_id": turn_id,
+                "user_text": user_text,
+                "reply": result.reply,
+                "spoken_text": speakify(result.reply, self.language),
+                "move": result.move,
+                "stage": result.stage,
+                "score": result.score,
+                "properties": result.cards,
+                "area": result.area,
+                "handoff_id": result.handoff_id,
+                "ended": result.ended,
+                "fallbacks": result.fallbacks,
+            }
+            if kind == "audio" or message.get("want_audio"):
+                wav = await self.voice.text_to_speech(payload["spoken_text"], self.language)
+                if wav:
+                    payload["audio"] = base64.b64encode(wav).decode("ascii")
+                    payload["audio_format"] = "audio/wav"
+            await _send(self.ws, payload)
+        except asyncio.CancelledError:
+            await _send(self.ws, {"type": "cancelled", "turn_id": turn_id})
+            raise
+        except Exception as exc:
+            logger.exception("voice turn failed for lead %s: %s", self.lead_id, exc)
+            await self._reply_template(turn_id, "error_fallback", user_text, fallbacks=["template:exception"])
+
+    async def _thinking(self, turn_id: str) -> None:
+        await asyncio.sleep(THINKING_AFTER_S)
+        await _send(self.ws, {"type": "thinking", "turn_id": turn_id})
+
+    async def _reply_template(
+        self, turn_id: str, key: str, user_text: str, *, fallbacks: list[str], stt_error: str | None = None, **facts: Any
+    ) -> None:
+        reply = templates.render(key, self.language, facts)
+        payload: dict[str, Any] = {
+            "type": "reply", "turn_id": turn_id, "user_text": user_text, "reply": reply,
+            "spoken_text": speakify(reply, self.language), "fallbacks": fallbacks,
+        }
+        if stt_error:
+            payload["stt_error"] = stt_error
+        await _send(self.ws, payload)
+
+
 @router.websocket("/conversation/{lead_id}")
 async def voice_conversation(
     websocket: WebSocket,
     lead_id: str,
     token: str = "",
     workspace_id: str = "",
+    session_id: str = "",
     backend: AuthBackend = Depends(get_auth_backend),
 ):
     try:
@@ -65,16 +195,21 @@ async def voice_conversation(
         return
     language = lead.get("preferred_language", "en") or "en"
 
-    await _send(
-        websocket,
-        {
-            "type": "ready",
-            "session_id": uuid.uuid4().hex,
-            "tts": voice.tts_available(language),
-            "heartbeat_s": HEARTBEAT_S,
-            "reply": templates.render("greeting", language, {"brokerage": "our brokerage"}),
-        },
-    )
+    ready: dict[str, Any] = {
+        "type": "ready",
+        "session_id": session_id or uuid.uuid4().hex,
+        "resumed": bool(session_id),
+        "tts": voice.tts_available(language),
+        "heartbeat_s": HEARTBEAT_S,
+        "reply": templates.render("greeting", language, {"brokerage": "our brokerage"}),
+    }
+    if session_id:
+        # Resume: the state is persisted after every turn, so only the transcript is replayed.
+        history = await ConversationRepo(context.workspace_id).history(lead_id, limit=20)
+        ready["history"] = [{"role": m.get("role"), "text": m.get("text"), "created_at": m.get("created_at")} for m in history]
+    await _send(websocket, ready)
+
+    session = VoiceSession(websocket, lead_id, context.workspace_id, language, voice)
 
     async def heartbeat() -> None:
         while True:
@@ -90,77 +225,25 @@ async def voice_conversation(
             if kind in {"ping", "pong"}:
                 if kind == "ping":
                     await _send(websocket, {"type": "pong"})
-                continue
-
-            turn_id = message.get("turn_id") or uuid.uuid4().hex
-            user_text = ""
-            stt_error: str | None = None
-            try:
-                if kind == "audio":
-                    audio = base64.b64decode(message.get("data") or "")
-                    transcript = await voice.transcribe(audio, language)
-                    if transcript.ok:
-                        user_text = transcript.text
-                    else:
-                        stt_error = transcript.error or "stt_failed"
-                elif kind == "text":
-                    user_text = (message.get("text") or "").strip()
-                else:
-                    await _send(websocket, {"type": "error", "turn_id": turn_id, "code": "unknown_message_type", "recoverable": True})
-                    continue
-
-                if not user_text:
-                    reply = templates.render("stt_failed", language, {})
-                    await _send(websocket, {"type": "reply", "turn_id": turn_id, "reply": reply, "user_text": "", "stt_error": stt_error, "fallbacks": ["stt"]})
-                    continue
-
-                result = await handle_turn(
-                    lead_id,
-                    user_text,
-                    workspace_id=context.workspace_id,
-                    channel="voice",
-                    idempotency_key=f"voice:{turn_id}",
-                )
-                language = result.language or language
-                payload = {
-                    "type": "reply",
-                    "turn_id": turn_id,
-                    "user_text": user_text,
-                    "reply": result.reply,
-                    "move": result.move,
-                    "stage": result.stage,
-                    "score": result.score,
-                    "properties": result.cards,
-                    "area": result.area,
-                    "handoff_id": result.handoff_id,
-                    "ended": result.ended,
-                    "fallbacks": result.fallbacks,
-                }
-                if kind == "audio" or message.get("want_audio"):
-                    wav = await voice.text_to_speech(result.reply, language)
-                    if wav:
-                        payload["audio"] = base64.b64encode(wav).decode("ascii")
-                        payload["audio_format"] = "audio/wav"
-                if not await _send(websocket, payload):
-                    break
-            except WebSocketDisconnect:
-                raise
-            except Exception as exc:
-                logger.exception("voice turn failed for lead %s: %s", lead_id, exc)
-                reply = templates.render("error_fallback", language, {})
-                if not await _send(websocket, {"type": "reply", "turn_id": turn_id, "user_text": user_text, "reply": reply, "fallbacks": ["template:exception"]}):
-                    break
+            elif kind == "interrupt":
+                await session.interrupt()
+            elif kind in {"audio", "text"}:
+                await session.interrupt()  # a new utterance always wins over an in-flight reply
+                session.start_turn(message)
+            else:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "unknown_message_type", "recoverable": True})
     except WebSocketDisconnect:
         logger.info("voice conversation ended for lead %s", lead_id)
     except Exception as exc:
         logger.error("voice websocket error: %s", exc)
     finally:
         hb.cancel()
+        await session.interrupt()
 
 
 @router.post("/synthesize")
 async def synthesize_speech(text: str, language: str = "en", context: RequestContext = Depends(get_request_context)):
-    audio = await VoiceService().text_to_speech(text, language)
+    audio = await VoiceService().text_to_speech(speakify(text, language), language)
     if audio is None:
         return Response(status_code=204, headers={"X-TTS-Fallback": "browser"})
     return Response(content=io.BytesIO(audio).getvalue(), media_type="audio/wav")

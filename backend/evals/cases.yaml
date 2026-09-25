@@ -1,0 +1,85 @@
+# Offline eval harness for the conversation engine (architecture §10). Each case
+# is one buyer conversation run through handle_turn() against the in-memory
+# store (no LLM keys → template path, so results are deterministic). A case
+# passes when every turn's expectations hold. Run: python -m scripts.run_evals
+- id: greeting_to_qualification_en
+  turns:
+    - say: "hi"
+      move: greeting
+    - say: "I want to buy a 2 bed apartment in Dubai Marina"
+      move: ask_next_field
+      slots: {purpose: buy, area: ["Dubai Marina"]}
+    - say: "around 2.5 million"
+      move: suggest
+      cards_min: 1
+      slots: {"budget.max_aed": 2500000}
+- id: rent_budget_per_year_en
+  turns:
+    - say: "looking to rent an apartment in JVC, 1 bedroom"
+      move: ask_next_field
+      slots: {purpose: rent}
+    - say: "120k per year"
+      move: suggest
+- id: ambiguous_budget_clarify
+  turns:
+    - say: "buy a villa in arabian ranches"
+    - say: "budget 3"
+      move: clarify_budget
+- id: unknown_area_clarify
+  turns:
+    - say: "I want to buy in Atlantis Moonbase"
+      move: clarify_area
+- id: stop_wins
+  turns:
+    - say: "2 bed in marina to buy"
+    - say: "STOP"
+      move: opt_out
+      ended: true
+- id: human_request_hands_off
+  turns:
+    - say: "I want to talk to a real person now"
+      move: handoff_now
+      handoff: true
+- id: explicit_handoff_confirmation
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+      move: suggest
+    - say: "within 3 months, cash"
+      move: confirm_handoff
+    - say: "yes please"
+      move: handoff
+      handoff: true
+- id: no_handoff_without_yes
+  turns:
+    - say: "buy 2 bed apartment dubai marina"
+    - say: "budget 2.5m"
+    - say: "within 3 months, cash"
+      move: confirm_handoff
+    - say: "not yet, just browsing"
+      handoff: false
+- id: area_question_uses_stored_travel_only
+  turns:
+    - say: "how far is dubai marina from downtown?"
+      move: answer_area
+      reply_contains: ["approx"]
+- id: arabic_flow
+  turns:
+    - say: "مرحبا، أبحث عن شقة غرفتين في مرسى دبي للشراء"
+      language: ar
+      move: ask_next_field
+    - say: "الميزانية 2.5 مليون"
+      language: ar
+      move: suggest
+- id: offtopic_redirects_to_discovery
+  turns:
+    - say: "hello"
+      move: greeting
+    - say: "what's the weather like today?"
+      move: ask_next_field
+- id: after_handoff_stays_quiet
+  turns:
+    - say: "talk to an agent please"
+      move: handoff_now
+    - say: "any villas in jumeirah?"
+      move: after_handoff

@@ -304,3 +304,21 @@ async def test_engine_concurrent_turns_serialise_per_lead():
     lead = await _lead(phone="+971500000006")
     await asyncio.gather(*[handle_turn(lead["id"], f"message {i}", workspace_id=WS) for i in range(5)])
     assert (await ConversationRepo(WS).load(lead["id"])).turn == 5
+
+
+@pytest.mark.asyncio
+async def test_engine_area_answer_quotes_only_stored_travel_numbers():
+    lead = await _lead(phone="+971500000004")
+    r = await handle_turn(lead["id"], "how far is dubai marina from downtown?", workspace_id=WS)
+    assert r.move == "answer_area" and r.area
+    travel = r.area["travel"]
+    assert travel and travel[0]["to_id"] == "downtown" and travel[0]["approx"] is True
+    assert str(travel[0]["minutes"]) in r.reply and ("approx" in r.reply or "about" in r.reply)
+
+
+@pytest.mark.asyncio
+async def test_engine_turn_emits_lead_scored_for_writeback():
+    lead = await _lead(phone="+971500000005")
+    await handle_turn(lead["id"], "2 bed apartment in marina, budget 2.5m to buy", workspace_id=WS)
+    evs = await table("lead_events", WS).select(lead_id=lead["id"], type="lead.scored")
+    assert evs and "score" in evs[0]["payload"]["changed_fields"]
