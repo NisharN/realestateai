@@ -118,6 +118,22 @@ GOODBYE_RE = re.compile(
     re.I,
 )
 WHY_RE = re.compile(r"\b(why (do |would |does |should )?(you|u|d'?you) (need|ask|want|care)|why (is|does) (that|this) (matter|needed|important)|what('s| is) (that|this) for)\b|لماذا (تسأل|تحتاج)", re.I)
+WHY_FIELD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("budget", re.compile(r"\b(budget|price range|how much (i|we) (can|want to) spend|money)\b|ميزانية|الميزانية", re.I)),
+    ("area", re.compile(r"\b(area|areas|location|community|communities|neighbou?rhood|where)\b|المنطقة|منطقة|الموقع", re.I)),
+    ("timeline", re.compile(r"\b(timeline|time ?frame|when|timing|how soon)\b|متى|التوقيت", re.I)),
+    ("bedrooms", re.compile(r"\b(bedrooms?|beds?|rooms?)\b|غرف|غرفة", re.I)),
+    ("property_type", re.compile(r"\b(property type|type of (property|home)|villa|apartment|townhouse)\b|نوع العقار", re.I)),
+    ("payment", re.compile(r"\b(payment|mortgage|cash|financ(e|ing))\b|الدفع|تمويل|رهن", re.I)),
+    ("purpose", re.compile(r"\b(purpose|buy or rent|buying or renting|invest(ing|ment)?)\b|الغرض|شراء أو إيجار", re.I)),
+)
+AREA_RECO_RE = re.compile(
+    r"\b((what|which) (areas?|communities|neighbou?rhoods?|locations?|places?) ((are|is|would be|give|gives|have|has|offer|offers|get|gets) |do you (recommend|suggest)|should i)|"
+    r"(best|good|top|high(est)?) (areas?|communities|locations?|places?) (for|to|with)|(best|good|high(est)?|strong(est)?) (rental )?(yield|roi|return)s?|"
+    r"where (should|can|would) (i|we) (buy|invest|rent|look)|recommend (me )?(an? |some )?(areas?|communities|locations?))\b|"
+    r"أفضل (المناطق|منطقة)|أي (منطقة|مناطق) (تنصح|أفضل)|عائد (إيجار|ايجار)",
+    re.I,
+)
 BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2}|one|two|three|four|five|six)\s*(\.|!)?\s*$", re.I)
 RANGE_UNIT_RE = re.compile(r"\b\d{1,2}\s*(-|–|to|or)\s*\d{1,2}\s*(months?|weeks?|years?|bed(room)?s?|br|bhk)\b", re.I)
 BEDROOM_RANGE_RE = re.compile(r"\b(\d{1,2})\s*(-|–|to|or)\s*(\d{1,2})\s*(bed(room)?s?|br|bhk)\b", re.I)
@@ -220,6 +236,9 @@ def extract_rules(text: str, state: ConversationState) -> ExtractedFacts:
     slots.timeline = _first(TIMELINE_PATTERNS, text)  # type: ignore[assignment]
     slots.payment = _first(PAYMENT_PATTERNS, text)  # type: ignore[assignment]
     facts.asks_why = bool(WHY_RE.search(text))
+    if facts.asks_why:
+        facts.why_field = next((f for f, pat in WHY_FIELD_PATTERNS if pat.search(text)), None)
+    facts.wants_area_recommendation = bool(AREA_RECO_RE.search(text)) and not slots.areas
 
     bare = BARE_NUMBER_RE.match(text)
     if bare and state.last_asked_field == "bedrooms" and slots.bedrooms is None:
@@ -265,7 +284,7 @@ def extract_rules(text: str, state: ConversationState) -> ExtractedFacts:
         facts.intent = "compare"
     elif ASK_PROPERTY_RE.search(text) and state.shortlist:
         facts.intent = "ask_property"
-    elif ASK_AREA_RE.search(text):
+    elif ASK_AREA_RE.search(text) or facts.wants_area_recommendation:
         facts.intent = "ask_area"
     elif objection and state.shortlist:
         facts.intent = "objection"

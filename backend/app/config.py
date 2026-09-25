@@ -80,7 +80,19 @@ class Settings(BaseSettings):
     TURN_DEADLINE_VOICE_S: float = 4.0
     STT_TIMEOUT_S: float = 2.5
     TTS_TIMEOUT_S: float = 2.0
-    VOICE_HEARTBEAT_S: float = 10.0
+
+    # --- Voice agent (architecture §11; served to the client via /voice/config) ---
+    VOICE_STT_PROVIDER: str = "auto"          # auto | groq | huggingface | none
+    VOICE_TTS_PROVIDER: str = "auto"          # auto | piper | browser | none
+    VOICE_HEARTBEAT_S: float = 20.0
+    VOICE_THINKING_AFTER_S: float = 1.2       # send `thinking` when a turn takes longer
+    VOICE_LOW_CONFIDENCE: float = 0.6         # STT confidence below this is repeated back
+    VOICE_VAD_SILENCE_MS: int = 900           # client stops an utterance after this much silence
+    VOICE_VAD_THRESHOLD: float = 0.015        # RMS level treated as speech (0..1)
+    VOICE_MAX_UTTERANCE_S: int = 30
+    VOICE_MAX_AUDIO_BYTES: int = 2 * 1024 * 1024
+    VOICE_MAX_TEXT_CHARS: int = 2000
+    VOICE_HANDS_FREE_DEFAULT: bool = True     # re-open the mic after Ali finishes speaking
     HANDOFF_REASSIGN_MINUTES: int = 15
 
     # --- Demo data (mock mode only) ---
