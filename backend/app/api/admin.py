@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import RequestContext, WorkspaceRole, get_request_context
-from app.modules.ingestion.connectors.crm_pull import poll_connector
+from app.modules.ingestion.connectors.crm_pull import PULL_TYPES, poll_connector, validate_crm_url
 from app.modules.ingestion.field_maps import save_field_map, suggest_field_map
 from app.modules.ingestion.pipeline.processor import process_many, resolve_review, retry_errors
 from app.modules.store import now_iso, table
@@ -62,6 +62,11 @@ async def create_connector(body: ConnectorCreate, context: RequestContext = Depe
     if body.type not in CONNECTOR_TYPES:
         raise HTTPException(400, detail={"code": "unknown_connector_type", "message": f"type must be one of {CONNECTOR_TYPES}"})
     mode = body.mode or ("push" if body.type in ("csv_upload", "webhook", "manual") else "pull")
+    if body.type in PULL_TYPES:
+        try:
+            validate_crm_url(body.config.get("url"))
+        except ValueError as exc:
+            raise HTTPException(400, detail={"code": "invalid_crm_url", "message": str(exc)})
     row = await table("connectors", context.workspace_id).insert(
         {
             "type": body.type,

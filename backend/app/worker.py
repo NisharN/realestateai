@@ -378,9 +378,13 @@ def send_due_followups() -> int:
 
 @celery_app.task(name="app.worker.retry_ingestion_errors")
 def retry_ingestion_errors() -> int:
-    from app.modules.ingestion.pipeline.processor import retry_errors
+    from app.modules.ingestion.pipeline.processor import process_stranded, retry_errors
 
-    return len(_run_async(retry_errors(settings.WORKSPACE_ID)))
+    async def _run() -> int:
+        ws = settings.WORKSPACE_ID
+        return len(await retry_errors(ws)) + len(await process_stranded(ws))
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.worker.poll_pull_connectors")

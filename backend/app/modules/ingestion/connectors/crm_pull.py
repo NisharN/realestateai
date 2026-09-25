@@ -19,9 +19,11 @@ each record lands untouched and the pipeline does the rest.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -75,9 +77,7 @@ class CrmPullConnector:
         return headers
 
     async def fetch_since(self, cursor: str | None) -> tuple[list[RawRecord], str | None]:
-        url = self.config.get("url")
-        if not url:
-            raise ValueError("connector config.url is required")
+        url = validate_crm_url(self.config.get("url"))
         cursor_param = self.config.get("cursor_param") or "updated_after"
         cursor_field = self.config.get("cursor_field") or "updated_at"
         id_field = self.config.get("id_field") or "id"
@@ -93,7 +93,8 @@ class CrmPullConnector:
                 if next_cursor:
                     params[cursor_param] = next_cursor
                 resp = await client.get(url, params=params, headers=self._headers())
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    raise CrmHttpError(resp.status_code)
                 body = resp.json()
                 items = _dig(body, records_path)
                 if not isinstance(items, list) or not items:
@@ -112,9 +113,11 @@ class CrmPullConnector:
                         break
                     next_cursor = str(server_cursor)
                 else:
-                    if page_cursor and page_cursor != next_cursor:
-                        next_cursor = page_cursor
-                    break
+                    # Changed-since paging: keep asking "after the newest seen" until the
+                    # CRM returns nothing new. Requires ascending order by cursor_field.
+                    if not page_cursor or page_cursor == next_cursor:
+                        break
+                    next_cursor = page_cursor
         finally:
             if self._client is None:
                 await client.aclose()
@@ -128,10 +131,12 @@ class CrmPullConnector:
         external_id = lead.get("crm_external_id")
         if not url or not external_id:
             return
+        validate_crm_url(url)
         client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S)
         try:
             resp = await client.patch(url.replace("{id}", str(external_id)), json=fields, headers=self._headers())
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise CrmHttpError(resp.status_code)
         finally:
             if self._client is None:
                 await client.aclose()
@@ -150,9 +155,10 @@ async def poll_connector(connector_id: str, *, workspace_id: str, client: httpx.
         await record_run(connector_id, workspace_id, ok=True)
         return {"connector_id": connector_id, "fetched": len(records), "landed": len(result.landed), "duplicates": result.duplicates, "cursor": cursor, "raw_ids": result.ids}
     except Exception as exc:
-        logger.warning("pull failed for connector %s: %s", connector_id, exc)
-        await record_run(connector_id, workspace_id, ok=False, error=str(exc))
-        return {"connector_id": connector_id, "error": str(exc), "raw_ids": []}
+        message = safe_error(exc)
+        logger.warning("pull failed for connector %s: %s", connector_id, message)
+        await record_run(connector_id, workspace_id, ok=False, error=message)
+        return {"connector_id": connector_id, "error": message, "raw_ids": []}
 
 
 async def due_pull_connectors(workspace_id: str) -> list[Row]:
@@ -161,12 +167,47 @@ async def due_pull_connectors(workspace_id: str) -> list[Row]:
     due = []
     for r in rows:
         every = int(r.get("schedule_seconds") or 0)
-        if every <= 0:
+        if every <= 0 or r.get("type") not in PULL_TYPES:
             continue
         last = r.get("last_run_at")
         if not last or _seconds_between(last, now) >= every:
             due.append(r)
     return due
+
+
+class CrmHttpError(Exception):
+    """HTTP failure without the request URL, so tokens in query strings never reach logs or last_error."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"CRM returned HTTP {status}")
+        self.status = status
+
+
+def safe_error(exc: Exception) -> str:
+    if isinstance(exc, (CrmHttpError, ValueError)):
+        return str(exc)
+    if isinstance(exc, httpx.HTTPError):
+        return f"{type(exc).__name__} while contacting CRM"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def validate_crm_url(url: Any) -> str:
+    """Only public HTTPS hosts: the poller runs inside the backend network."""
+    if not url or not isinstance(url, str):
+        raise ValueError("connector config.url is required")
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or not host:
+        raise ValueError("CRM url must be https://")
+    if host in ("localhost", "metadata.google.internal") or host.endswith((".local", ".internal", ".localhost")) or "." not in host:
+        raise ValueError("CRM url must point at a public host")
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return url
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+        raise ValueError("CRM url must point at a public host")
+    return url
 
 
 def _seconds_between(a: str, b: str) -> float:

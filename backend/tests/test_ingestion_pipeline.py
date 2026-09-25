@@ -20,7 +20,7 @@ from app.modules.ingestion.connectors.crm_pull import poll_connector
 from app.modules.ingestion.connectors.csv_upload import parse_csv
 from app.modules.ingestion.connectors.webhook import SignatureError, WebhookConnector
 from app.modules.ingestion.field_maps import suggest_field_map
-from app.modules.ingestion.models import CanonicalLead
+from app.modules.ingestion.models import CanonicalLead, RawRecord
 from app.modules.ingestion.pipeline.processor import process_many, process_record, retry_errors
 from app.modules.ingestion.pipeline.stages import clean_phone, clean_record, map_record, validate_record
 from app.modules.store import reset_memory, table
@@ -332,3 +332,50 @@ async def test_crm_pull_failure_records_run_and_pauses_after_five():
     assert "error" in res
     row = client.get(f"/api/v1/admin/connectors/{created['id']}").json()
     assert row["status"] == "paused" and row["consecutive_failures"] == 5
+
+
+def test_crm_url_must_be_public_https():
+    from app.modules.ingestion.connectors.crm_pull import validate_crm_url
+
+    assert validate_crm_url("https://api.hubapi.com/crm/v3/objects/contacts")
+    for bad in ("http://crm.example.com/x", "https://localhost/x", "https://10.0.0.5/x", "https://169.254.169.254/latest", "https://[::1]/x", "https://internal/x"):
+        with pytest.raises(ValueError):
+            validate_crm_url(bad)
+    r = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "config": {"url": "http://127.0.0.1:8000/leads"}})
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_crm_url"
+
+
+async def test_crm_pull_changed_since_pages_until_exhausted_and_hides_token_in_errors():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        after = request.url.params.get("since")
+        calls.append(after or "")
+        if after == "2026-01-02":
+            return httpx.Response(200, json=[])
+        if after == "2026-01-01":
+            return httpx.Response(200, json=[{"key": "b", "Mobile": "0502222222", "ts": "2026-01-02"}])
+        return httpx.Response(200, json=[{"key": "a", "Mobile": "0501111111", "ts": "2026-01-01"}])
+
+    created = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "supersecret", "config": {"url": "https://crm.test/leads", "cursor_param": "since", "cursor_field": "ts", "id_field": "key"}}).json()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        res = await poll_connector(created["id"], workspace_id=WS, client=http)
+    assert res["landed"] == 2 and res["cursor"] == "2026-01-02" and calls == ["", "2026-01-01", "2026-01-02"]
+    outcomes = await process_many(res["raw_ids"], workspace_id=WS)
+    leads = await get_lead_repository(WS).list_all()
+    assert {l["crm_external_id"] for l in leads if l.get("crm_external_id")} >= {"a", "b"} and all(o.status == "published" for o in outcomes)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(401))) as http:
+        res = await poll_connector(created["id"], workspace_id=WS, client=http)
+    row = client.get(f"/api/v1/admin/connectors/{created['id']}").json()
+    assert res["error"] == "CRM returned HTTP 401" and "supersecret" not in json.dumps(row)
+
+
+async def test_stranded_landed_records_are_picked_up():
+    from app.modules.ingestion.pipeline.processor import process_stranded
+
+    result = await land([RawRecord(external_id="s1", payload={"Mobile": "0503333333", "Name": "Stranded"}, source_hint="csv")], connector_id=None, workspace_id=WS)
+    assert len(result.ids) == 1
+    assert await process_stranded(WS, older_than_seconds=600) == []  # too fresh
+    outcomes = await process_stranded(WS, older_than_seconds=0)
+    assert [o.status for o in outcomes] == ["published"]
