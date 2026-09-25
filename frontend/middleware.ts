@@ -4,7 +4,12 @@ import { refreshSession } from "@/lib/supabase/middleware";
 
 const protectedPaths = ["/", "/dashboard", "/configure", "/docs", "/members", "/properties"];
 
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
 export async function middleware(request: NextRequest) {
+  if (DEMO_MODE) {
+    return NextResponse.next({ request });
+  }
   const { response, user } = await refreshSession(request);
   const pathname = request.nextUrl.pathname;
   const isProtected = protectedPaths.some(
