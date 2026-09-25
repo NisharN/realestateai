@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     TTS_TIMEOUT_S: float = 2.0
     VOICE_HEARTBEAT_S: float = 10.0
     HANDOFF_REASSIGN_MINUTES: int = 15
+
+    # --- PDPL retention (architecture §15) ---
+    RETENTION_RAW_DAYS: int = 90        # raw connector payloads
+    RETENTION_LEAD_DAYS: int = 730      # idle, unconverted, unassigned leads
+
+    # --- Fault injection (pilot drills only; never set in production) ---
+    FAULT_LLM_ALL: bool = False         # every LLM provider fails -> deterministic replies
+    FAULT_STT: bool = False             # STT fails -> client asked to type
+    FAULT_TTS: bool = False             # TTS fails -> browser speech fallback
+    FAULT_DB_SLOW_MS: int = 0           # added latency per table call
     WEBHOOK_SIGNING_SECRET: str = ""          # generic push connector HMAC key
     HUGGING_FACE_API_KEY: str = ""
     HUGGING_FACE_STT_MODEL: str = "openai/whisper-large-v3-turbo"

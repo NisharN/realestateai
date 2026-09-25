@@ -14,6 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Iterable, Protocol
 
+from app.config import get_settings
 from app.database import DatabaseClient, current_workspace_id
 
 Row = dict[str, Any]
@@ -204,9 +205,47 @@ class SupabaseTable:
 def table(name: str, workspace_id: str | None = None) -> Table:
     resolved = workspace_id or current_workspace_id()
     client = DatabaseClient.get_client()
-    if client is None:
-        return MemoryTable(name, resolved)
-    return SupabaseTable(client, name, resolved)
+    base: Table = MemoryTable(name, resolved) if client is None else SupabaseTable(client, name, resolved)
+    slow_ms = get_settings().FAULT_DB_SLOW_MS
+    return SlowTable(base, slow_ms / 1000) if slow_ms > 0 else base
+
+
+class SlowTable:
+    """Fault-injection wrapper (FAULT_DB_SLOW_MS): adds latency to every call."""
+
+    def __init__(self, inner: Table, delay_s: float) -> None:
+        self.inner = inner
+        self.delay_s = delay_s
+        self.name = inner.name
+        self.workspace_id = inner.workspace_id
+
+    async def insert(self, row: Row) -> Row:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.insert(row)
+
+    async def upsert(self, row: Row, on_conflict: str) -> Row:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.upsert(row, on_conflict)
+
+    async def get(self, **filters: Any) -> Row | None:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.get(**filters)
+
+    async def select(self, *, order: str | None = None, desc: bool = False, limit: int = 100, offset: int = 0, **filters: Any) -> list[Row]:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.select(order=order, desc=desc, limit=limit, offset=offset, **filters)
+
+    async def update(self, updates: Row, **filters: Any) -> list[Row]:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.update(updates, **filters)
+
+    async def delete(self, **filters: Any) -> int:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.delete(**filters)
+
+    async def count(self, **filters: Any) -> int:
+        await asyncio.sleep(self.delay_s)
+        return await self.inner.count(**filters)
 
 
 def lock_for(key: str) -> asyncio.Lock:

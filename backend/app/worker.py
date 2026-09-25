@@ -69,6 +69,10 @@ celery_app.conf.update(
             "task": "app.worker.crm_writeback",
             "schedule": 60.0,
         },
+        "retention-purge": {
+            "task": "app.worker.retention_purge",
+            "schedule": 86_400.0,
+        },
     },
 )
 
@@ -378,6 +382,14 @@ def send_due_followups() -> int:
     from app.modules.handoff.followups import send_due
 
     return len(_run_async(send_due(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.retention_purge")
+def retention_purge() -> Dict[str, int]:
+    """PDPL retention: drop old raw payloads, erase idle unconverted leads."""
+    from app.modules.privacy.service import retention_purge as _purge
+
+    return _run_async(_purge(settings.WORKSPACE_ID))
 
 
 @celery_app.task(name="app.worker.retry_ingestion_errors")
