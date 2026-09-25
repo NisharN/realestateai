@@ -55,3 +55,9 @@ stt_failed:
   - "Sorry, I couldn't hear that clearly. Could you say it again, or type your message?"
 error_fallback:
   - "Sorry, I didn't quite catch that. Could you say it another way?"
+followup_1:
+  - "Hi {name}, it's Ali from the property team. A few new listings matching your brief just came in — want me to send them over?"
+followup_2:
+  - "Hi {name}, checking in — has anything changed in what you're looking for? I can refresh your shortlist any time."
+followup_3:
+  - "Hi {name}, just a last check-in from me. Whenever you're ready to look again, reply here and I'll pick up where we left off."

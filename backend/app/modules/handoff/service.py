@@ -118,6 +118,17 @@ async def accept_handoff(handoff_id: str, broker_id: str, workspace_id: str) -> 
     return updated[0] if updated else None
 
 
+async def decline_handoff(handoff_id: str, broker_id: str, workspace_id: str, *, reason: str | None = None) -> dict[str, Any] | None:
+    """Broker declines: reroute immediately to the next eligible broker."""
+    handoffs = table("handoffs", workspace_id)
+    row = await handoffs.get(id=handoff_id)
+    if not row or row.get("broker_id") != broker_id or row.get("status") != "pending":
+        return None
+    await handoffs.update({"decline_reason": reason, "declined_at": now_iso()}, id=handoff_id)
+    row["decline_reason"] = reason
+    return await _reroute(row, workspace_id, await _brokers(workspace_id), datetime.now(timezone.utc), why="declined")
+
+
 async def reassign_stale(workspace_id: str, now: datetime | None = None) -> list[dict[str, Any]]:
     """Move unaccepted handoffs to the next broker after 15 minutes."""
     now = now or datetime.now(timezone.utc)
@@ -129,25 +140,42 @@ async def reassign_stale(workspace_id: str, now: datetime | None = None) -> list
     brokers = await _brokers(workspace_id)
     changed: list[dict[str, Any]] = []
     for h in stale:
-        tried = set(h.get("tried_broker_ids") or [])
-        if h.get("broker_id"):
-            tried.add(h["broker_id"])
-        decision = route(brokers, language=h.get("language") or "en", community_ids=list((h.get("brief") or {}).get("profile", {}).get("community_ids") or []), exclude_ids=tried)
-        if not decision.broker:
-            await handoffs.update({"status": "escalated", "routing_reasons": decision.reasons}, id=h["id"])
-            continue
-        updated = await handoffs.update(
-            {
-                "broker_id": decision.broker.id,
-                "broker_name": decision.broker.name,
-                "tried_broker_ids": sorted(tried),
-                "reassigned_count": int(h.get("reassigned_count") or 0) + 1,
-                "reassign_after": (now + timedelta(minutes=REASSIGN_AFTER_MIN)).isoformat(),
-                "routing_reasons": decision.reasons,
-            },
-            id=h["id"],
-        )
+        updated = await _reroute(h, workspace_id, brokers, now, why="timeout")
         if updated:
-            changed.append(updated[0])
-            await _alert_broker(decision.broker, BrokerBrief.model_validate(h["brief"]), updated[0], workspace_id)
+            changed.append(updated)
     return changed
+
+
+async def _reroute(h: dict[str, Any], workspace_id: str, brokers: list[BrokerProfile], now: datetime, *, why: str) -> dict[str, Any] | None:
+    handoffs = table("handoffs", workspace_id)
+    tried = set(h.get("tried_broker_ids") or [])
+    if h.get("broker_id"):
+        tried.add(h["broker_id"])
+    decision = route(brokers, language=h.get("language") or "en", community_ids=list((h.get("brief") or {}).get("profile", {}).get("community_ids") or []), exclude_ids=tried)
+    if not decision.broker:
+        rows = await handoffs.update({"status": "escalated", "routing_reasons": decision.reasons, "escalated_at": now_iso()}, id=h["id"])
+        await table("lead_events", workspace_id).insert({"lead_id": h["lead_id"], "type": "handoff.escalated", "payload": {"handoff_id": h["id"], "why": why}})
+        return rows[0] if rows else None
+    updated = await handoffs.update(
+        {
+            "broker_id": decision.broker.id,
+            "broker_name": decision.broker.name,
+            "status": "pending",
+            "reassigned_from": h.get("broker_id"),
+            "tried_broker_ids": sorted(tried),
+            "reassigned_count": int(h.get("reassigned_count") or 0) + 1,
+            "reassign_after": (now + timedelta(minutes=REASSIGN_AFTER_MIN)).isoformat(),
+            "routing_reasons": decision.reasons,
+        },
+        id=h["id"],
+    )
+    if not updated:
+        return None
+    try:
+        await get_lead_repository(workspace_id).update(h["lead_id"], {"assigned_broker": decision.broker.id})
+        await get_broker_repository(workspace_id).increment_lead_count(decision.broker.id)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("reassignment side-effects failed: %s", exc)
+    await table("lead_events", workspace_id).insert({"lead_id": h["lead_id"], "type": "handoff.reassigned", "payload": {"handoff_id": h["id"], "from": h.get("broker_id"), "to": decision.broker.id, "why": why}})
+    await _alert_broker(decision.broker, BrokerBrief.model_validate(h["brief"]), updated[0], workspace_id)
+    return updated[0]
