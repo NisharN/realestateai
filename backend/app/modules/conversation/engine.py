@@ -184,6 +184,7 @@ async def _run(
     move = decision.move
     if decision.field:
         state.asked[decision.field] = state.asked.get(decision.field, 0) + 1
+    state.last_asked_field = decision.field if move in {Move.ASK_NEXT_FIELD, Move.GREETING} else None
     if move == Move.CLARIFY_BUDGET:
         state.asked["budget_clarify"] = state.asked.get("budget_clarify", 0) + 1
     if move == Move.CLARIFY_AREA:
@@ -198,12 +199,15 @@ async def _run(
     # 6. respond ----------------------------------------------------------
     reply_facts = _reply_facts(move, state, facts, tool_results, decision.field)
     resp_fallbacks: list[str]
-    if move == Move.SMALL_TALK_REDIRECT and not reply_facts.get("next_question") and state.shortlist:
-        reply, resp_fallbacks = templates.render("ask_reaction", state.language, reply_facts), []
+    if move == Move.SMALL_TALK_REDIRECT and not reply_facts.get("next_question"):
+        reply = templates.render("ask_reaction" if state.shortlist else "small_talk_generic", state.language, reply_facts)
+        resp_fallbacks = []
     else:
         reply, resp_fallbacks = await respond(
             move, state, reply_facts, deadline_s=deadline.remaining(settings.LLM_RESPOND_TIMEOUT_S), field=decision.field
         )
+    if facts.asks_why and move == Move.ASK_NEXT_FIELD and decision.field:
+        reply = f"{templates.render('why_explain', state.language, reply_facts, field=decision.field)} {reply}"
     fallbacks.extend(resp_fallbacks)
     state.last_move = move.value
 

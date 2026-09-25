@@ -32,6 +32,9 @@ def decide(state: ConversationState, facts: ExtractedFacts) -> Decision:
     if state.misunderstandings >= 2:
         return Decision(Move.HANDOFF_NOW, 2, reason="two misunderstandings in a row")
 
+    if intent == "goodbye":
+        return Decision(Move.GOODBYE, 2, reason="buyer signed off")
+
     # First contact: greet and ask the first field.
     if state.turn <= 1 and state.stage == "greeting" and intent in {"smalltalk", "unclear"} and not state.profile:
         return Decision(Move.GREETING, 0, field=state.next_field_to_ask(MAX_ASKS))
@@ -72,12 +75,14 @@ def decide(state: ConversationState, facts: ExtractedFacts) -> Decision:
     if timeline in LONG_TIMELINES:
         return Decision(Move.NURTURE, 13, reason="timeline over 12 months")
 
-    # 9 — discovery, one field at a time, never more than twice.
+    # 9 — discovery, one field at a time, never more than twice. A required
+    #     slot the buyer has sidestepped twice stops blocking the search.
     missing = state.missing_required()
     if missing:
         field = state.next_field_to_ask(MAX_ASKS)
         if field is not None:
             return Decision(Move.ASK_NEXT_FIELD, 9, field=field, reason=f"missing {', '.join(missing)}")
+        missing = [m for m in missing if state.asked.get(m, 0) < MAX_ASKS]
 
     # 10 — everything needed is known: show inventory.
     if not missing and (not state.shortlist or state.last_shortlist_rejected() or state.shortlist_is_stale()):

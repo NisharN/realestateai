@@ -20,6 +20,7 @@ class Move(str, Enum):
     NURTURE = "nurture"
     SMALL_TALK_REDIRECT = "small_talk_redirect"
     GREETING = "greeting"
+    GOODBYE = "goodbye"
 
 
 TOOLS_FOR_MOVE: dict[Move, tuple[str, ...]] = {
@@ -38,6 +39,7 @@ TOOLS_FOR_MOVE: dict[Move, tuple[str, ...]] = {
     Move.NURTURE: ("followup_schedule",),
     Move.SMALL_TALK_REDIRECT: (),
     Move.GREETING: (),
+    Move.GOODBYE: (),
 }
 
 # Moves that end the AI's active role in the conversation.

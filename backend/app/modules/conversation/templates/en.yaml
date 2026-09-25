@@ -51,6 +51,18 @@ nurture:
 small_talk_redirect:
   - "Happy to help with that. To find the right property for you, could you tell me {next_question_lower}"
   - "Sure. Let's get you the right options — {next_question_lower}"
+small_talk_generic:
+  - "Happy to help. Tell me a bit more about what you're looking for — area, budget or property type — and I'll pull the right options."
+goodbye:
+  - "Thanks for chatting{name_suffix}. I've saved your brief, so whenever you're ready just message me here and we'll pick up where we left off."
+why_explain:
+  purpose: "Buying, renting and investing have very different options and paperwork, so this lets me show you the right ones."
+  budget: "Your budget lets me show only homes you can actually act on, instead of wasting your time with options outside it."
+  area: "Knowing the areas you like lets me match you to the right communities and travel times rather than guessing."
+  property_type: "Apartments, villas and townhouses are very different markets in Dubai, so this narrows the search a lot."
+  bedrooms: "Bedroom count is the quickest way to filter out unsuitable listings."
+  timeline: "Your timeline tells me whether to show ready homes or upcoming ones, and how quickly to move."
+  payment: "Cash and mortgage purchases follow different steps, so this helps me guide you properly."
 ask_reaction:
   - "Noted, thank you. Do any of the options I showed you look interesting, or should I adjust the search?"
 after_handoff:

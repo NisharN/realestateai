@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 Intent = Literal[
     "provide_info", "ask_property", "ask_area", "compare", "request_viewing",
     "request_human", "objection", "smalltalk", "not_interested", "stop", "unclear",
-    "agree", "disagree",
+    "agree", "disagree", "goodbye",
 ]
 Objection = Literal["price", "location", "size", "payment", "handover", "other"]
 Timeline = Literal["asap", "1_month", "3_months", "6_months", "12_months", "later", "unknown"]
@@ -50,6 +50,7 @@ class ExtractedFacts(BaseModel):
     slots: Slots = Field(default_factory=Slots)
     reactions: list[Reaction] = Field(default_factory=list)
     objection: Objection | None = None
+    asks_why: bool = False
     confidence: float = 0.0
     # Filled by the rule extractor / merge step, never by the LLM directly:
     budget_ambiguous: bool = False
