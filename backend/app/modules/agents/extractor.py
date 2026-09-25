@@ -26,7 +26,7 @@ STOP_RE = re.compile(
     re.I,
 )
 HUMAN_RE = re.compile(
-    r"\b(speak|talk|chat)\s+(to|with)\s+(a\s+)?(human|person|agent|broker|someone|real person)|"
+    r"\b(speak|talk|chat)\s+(to|with)\s+(an?\s+)?(human|person|agent|broker|someone|real person)|"
     r"\b(real|human)\s+(agent|person|broker)\b|\b(get|give|connect|put)\s+me\s+(to\s+|with\s+)?(a\s+|an\s+)?(human|person|agent|broker)\b|\bcall me\b|\bcan (someone|an agent|a broker) call\b|"
     r"\bnot a bot\b|\bare you a bot\b.*\bhuman\b|أريد (التحدث|الكلام) مع (شخص|موظف|وسيط)|اتصل بي|شخص حقيقي|موظف حقيقي",
     re.I,

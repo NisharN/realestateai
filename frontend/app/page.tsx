@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
-import { leadsApi, propertiesApi, VoiceWebSocket } from "@/lib/api";
+import { leadsApi, propertiesApi, VoiceWebSocket, type VoiceServerMessage } from "@/lib/api";
 import {
   Send,
   Mic,
@@ -34,6 +34,10 @@ const PropertyMap = dynamic(() => import("./_property-map").then((m) => m.Proper
   ssr: false,
   loading: () => null,
 });
+const InlineMap = dynamic(() => import("./_inline-map").then((m) => m.InlineMap), {
+  ssr: false,
+  loading: () => null,
+});
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Message {
@@ -41,8 +45,32 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   properties?: Property[];
+  area?: AreaAnswer;
   needsHuman?: boolean;
   timestamp: Date;
+}
+
+// Mirrors backend AreaProfile: every number here is stored inventory / offline gazetteer data.
+interface AreaAnswer {
+  community_id: string;
+  name_en: string;
+  name_ar: string;
+  lat: number;
+  lng: number;
+  listing_count: number;
+  median_price: number | null;
+  median_price_psf: number | null;
+  travel: {
+    to_id: string;
+    to_name_en: string;
+    to_name_ar: string;
+    to_lat: number;
+    to_lng: number;
+    minutes: number;
+    km: number;
+    method: string;
+    approx: boolean;
+  }[];
 }
 
 interface PropertyCardDto {
@@ -69,8 +97,8 @@ interface Property {
   size_sqft: number;
   images: string[];
   video_url?: string;
-  map_lat: number;
-  map_lng: number;
+  map_lat: number | null;
+  map_lng: number | null;
   amenities: string[];
   match_score?: number;
 }
@@ -164,6 +192,15 @@ function PropertyCard({
           </span>
         </div>
 
+        {property.map_lat != null && property.map_lng != null && (
+          <div className="mb-3">
+            <InlineMap
+              pins={[{ id: property.id, lat: property.map_lat, lng: property.map_lng, label: property.title, sublabel: property.area }]}
+              height={120}
+            />
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-1 mb-3">
           {property.amenities.slice(0, 3).map((a) => (
             <span
@@ -180,7 +217,8 @@ function PropertyCard({
           <div className="flex gap-2">
             <button
               onClick={() => onViewMap(property)}
-              className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+              disabled={property.map_lat == null || property.map_lng == null}
+              className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition disabled:opacity-40 disabled:hover:bg-transparent"
             >
               <MapPin className="w-4 h-4" />
             </button>
@@ -189,6 +227,55 @@ function PropertyCard({
             </button>
           </div>
         </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Area Answer Card ───────────────────────────────────────────────────────
+function AreaCard({ area }: { area: AreaAnswer }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100 max-w-md"
+    >
+      <InlineMap
+        pins={[{ id: area.community_id, lat: area.lat, lng: area.lng, label: area.name_en, sublabel: area.name_ar }]}
+        travel={area.travel.map((t) => ({
+          to_id: t.to_id,
+          to_lat: t.to_lat,
+          to_lng: t.to_lng,
+          label: t.to_name_en,
+          minutes: t.minutes,
+          approx: t.approx,
+        }))}
+        height={180}
+        interactive
+      />
+      <div className="p-4">
+        <div className="flex items-center gap-1 text-gray-900 font-semibold text-sm mb-2">
+          <MapPin className="w-3.5 h-3.5 text-blue-600" />
+          {area.name_en}
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-3">
+          <span>{area.listing_count} listings in inventory</span>
+          {area.median_price != null && <span>Median {fmtAED(Math.round(area.median_price))}</span>}
+          {area.median_price_psf != null && <span>{Math.round(area.median_price_psf).toLocaleString()} AED/sqft</span>}
+        </div>
+        {area.travel.length > 0 && (
+          <ul className="space-y-1 text-xs text-gray-600">
+            {area.travel.map((t) => (
+              <li key={t.to_id} className="flex justify-between">
+                <span>{t.to_name_en}</span>
+                <span className="font-medium text-gray-800">
+                  {t.approx ? "≈ " : ""}
+                  {t.minutes} min · {t.km} km
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </motion.div>
   );
@@ -208,9 +295,38 @@ function VoiceModal({
 }) {
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState("");
-  const [status, setStatus] = useState<"idle" | "listening" | "connecting" | "sending">("idle");
+  const [status, setStatus] = useState<"idle" | "listening" | "connecting" | "sending" | "thinking" | "speaking">("idle");
   const [recording, setRecording] = useState(false);
   const wsRef = useRef<VoiceWebSocket | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Barge-in: stop whatever Ali is saying (server turn + local playback).
+  const stopSpeaking = useCallback(() => {
+    wsRef.current?.interrupt();
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  }, []);
+
+  const speak = useCallback((msg: Extract<VoiceServerMessage, { type: "reply" }>) => {
+    if (msg.audio) {
+      const el = new Audio(`data:${msg.audio_format || "audio/wav"};base64,${msg.audio}`);
+      audioRef.current = el;
+      el.onended = () => setStatus("idle");
+      el.play().catch(() => setStatus("idle"));
+      setStatus("speaking");
+      return;
+    }
+    // Last resort: browser speech synthesis of the deterministic spoken_text.
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const u = new SpeechSynthesisUtterance(msg.spoken_text || msg.reply);
+      u.onend = () => setStatus("idle");
+      window.speechSynthesis.speak(u);
+      setStatus("speaking");
+      return;
+    }
+    setStatus("idle");
+  }, []);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -260,12 +376,29 @@ function VoiceModal({
     const ws = new VoiceWebSocket(
       leadId,
       (data) => {
-        if (data.type === "text") {
-          setResponse(data.content || "");
-          onAgentMessage(data.content || "", data.properties || []);
-        } else if (data.type === "audio") {
-          setResponse(data.text || "");
-          onAgentMessage(data.text || "", data.properties || []);
+        switch (data.type) {
+          case "ready":
+            setStatus("idle");
+            if (data.resumed && data.history?.length) {
+              const last = data.history[data.history.length - 1];
+              if (last.role === "assistant") setResponse(last.text);
+            }
+            break;
+          case "transcript":
+            setTranscript(data.text);
+            break;
+          case "thinking":
+            setStatus("thinking");
+            break;
+          case "reply":
+            setResponse(data.reply);
+            onAgentMessage(data.reply, data.properties || []);
+            speak(data);
+            break;
+          case "cancelled":
+          case "error":
+            setStatus("idle");
+            break;
         }
       },
       () => {
@@ -280,9 +413,10 @@ function VoiceModal({
       ws.disconnect();
       wsRef.current = null;
     };
-  }, [isOpen, leadId, onAgentMessage]);
+  }, [isOpen, leadId, onAgentMessage, speak]);
 
   const startRecording = async () => {
+    stopSpeaking();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
@@ -323,6 +457,7 @@ function VoiceModal({
 
   const sendText = (txt: string) => {
     if (!txt.trim()) return;
+    stopSpeaking();
     setTranscript(txt);
     if (wsRef.current) {
       wsRef.current.sendText(txt);
@@ -362,9 +497,11 @@ function VoiceModal({
               ? "Listening..."
               : status === "connecting"
                 ? "Connecting..."
-                : status === "sending"
+                : status === "sending" || status === "thinking"
                   ? "Ali is thinking..."
-                  : leadId
+                  : status === "speaking"
+                    ? "Ali is speaking — tap the mic to interrupt"
+                    : leadId
                     ? "Tap the mic or type below"
                     : "Send a chat message first to start a session"}
           </p>
@@ -547,6 +684,7 @@ export default function ChatPage() {
       response: string;
       needs_human: boolean;
       matched_properties: PropertyCardDto[];
+      area?: AreaAnswer | null;
     };
 
     const properties: Property[] = (data.matched_properties || []).map((p) => ({
@@ -558,8 +696,8 @@ export default function ChatPage() {
       bathrooms: p.bathrooms ?? 0,
       size_sqft: p.size_sqft ?? 0,
       images: p.image ? [p.image] : [],
-      map_lat: p.lat ?? 25.2,
-      map_lng: p.lng ?? 55.27,
+      map_lat: p.lat,
+      map_lng: p.lng,
       amenities: p.match_reasons ?? [],
     }));
 
@@ -572,6 +710,7 @@ export default function ChatPage() {
         role: "assistant",
         content: data.response,
         properties: properties.length ? properties : undefined,
+        area: data.area ?? undefined,
         needsHuman: data.needs_human,
         timestamp: new Date(),
       },
@@ -902,6 +1041,8 @@ export default function ChatPage() {
                       </span>
                     ))}
                   </div>
+
+                  {msg.area && <AreaCard area={msg.area} />}
 
                   {msg.properties && msg.properties.length > 0 && (
                     <div className="space-y-3">

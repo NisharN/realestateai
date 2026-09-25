@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.database import get_property_repository
 from app.modules.geo.communities import Community, get_community, resolve_area
+from app.modules.geo.travel import TravelTime, nearest_communities, travel_summary
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class AreaProfile(BaseModel):
     median_price_psf: float | None = None
     price_range: tuple[float, float] | None = None
     data_as_of: str = "inventory"
+    travel: list[TravelTime] = Field(default_factory=list)
+    nearby_communities: list[dict[str, Any]] = Field(default_factory=list)
     facts: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -71,6 +74,16 @@ async def area_profile(text_or_id: str, workspace_id: str, language: str = "en")
     psf = [float(r["price_per_sqft"]) for r in rows if r.get("price_per_sqft")]
     psf += [float(r["price"]) / float(r["size_sqft"]) for r in rows if r.get("price") and r.get("size_sqft") and not r.get("price_per_sqft")]
 
+    try:
+        travel = await travel_summary(community.id)
+    except Exception as exc:
+        logger.warning("area_profile travel lookup failed: %s", exc)
+        travel = []
+    nearby = [
+        {"community_id": c.id, "name_en": c.name_en, "name_ar": c.name_ar, "km": km}
+        for c, km in nearest_communities(community.id)
+    ]
+
     text = _PROFILE_TEXT.get(community.id, {}).get(language) or _PROFILE_TEXT.get(community.id, {}).get("en") or (
         "a Dubai community." if language == "en" else "منطقة في دبي."
     )
@@ -85,4 +98,6 @@ async def area_profile(text_or_id: str, workspace_id: str, language: str = "en")
         median_price=round(median(prices)) if prices else None,
         median_price_psf=round(median(psf)) if psf else None,
         price_range=(min(prices), max(prices)) if prices else None,
+        travel=travel,
+        nearby_communities=nearby,
     )

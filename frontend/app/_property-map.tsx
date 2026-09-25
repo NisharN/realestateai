@@ -15,8 +15,8 @@ interface Property {
   title: string;
   area: string;
   price: number;
-  map_lat: number;
-  map_lng: number;
+  map_lat: number | null;
+  map_lng: number | null;
   match_score?: number;
 }
 
@@ -43,6 +43,10 @@ export function PropertyMap({
 
   if (!mounted) return null;
 
+  const placed = properties.filter((p): p is Property & { map_lat: number; map_lng: number } => p.map_lat != null && p.map_lng != null);
+  const focus = selectedProperty && selectedProperty.map_lat != null && selectedProperty.map_lng != null ? selectedProperty : null;
+  const center: [number, number] = focus ? [focus.map_lat as number, focus.map_lng as number] : [25.2048, 55.2708];
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -63,8 +67,8 @@ export function PropertyMap({
           <X className="w-5 h-5 text-gray-700" />
         </button>
         <MapContainer
-          center={[25.2048, 55.2708]}
-          zoom={11}
+          center={center}
+          zoom={focus ? 14 : 11}
           scrollWheelZoom
           style={{ width: "100%", height: "100%" }}
         >
@@ -72,7 +76,7 @@ export function PropertyMap({
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {properties.map((p) => (
+          {placed.map((p) => (
             <Marker key={p.id} position={[p.map_lat, p.map_lng]}>
               <Popup>
                 <div className="text-sm">

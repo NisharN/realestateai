@@ -13,6 +13,8 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,10 +25,29 @@ class Transcript:
     text: str
     provider: str | None  # None when every provider failed / none configured
     error: str | None = None
+    confidence: float | None = None  # 0..1 when the provider reports it
 
     @property
     def ok(self) -> bool:
         return bool(self.text.strip()) and self.provider is not None
+
+
+def _whisper_confidence(response: object) -> float | None:
+    """Mean segment avg_logprob (≈ -1..0) mapped onto 0..1; None when absent."""
+    if not isinstance(response, BaseModel):
+        return None
+    segments = response.model_dump().get("segments")
+    if not isinstance(segments, list) or not segments:
+        return None
+    probs: list[float] = []
+    for seg in segments:
+        lp = seg.get("avg_logprob") if isinstance(seg, dict) else None
+        if isinstance(lp, (int, float)):
+            probs.append(float(lp))
+    if not probs:
+        return None
+    mean = sum(probs) / len(probs)
+    return max(0.0, min(1.0, 1.0 + mean))
 
 
 class VoiceService:
@@ -34,6 +55,7 @@ class VoiceService:
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.last_confidence: float | None = None
         self.groq_client = None
         self.huggingface_client = None
         try:
@@ -63,8 +85,9 @@ class VoiceService:
 
         if self.groq_client:
             try:
+                self.last_confidence = None
                 text = await asyncio.wait_for(self._groq_stt(audio_bytes, language), timeout=timeout)
-                return Transcript(text=text, provider="groq")
+                return Transcript(text=text, provider="groq", confidence=self.last_confidence)
             except Exception as exc:
                 last_error = f"groq: {exc}"
                 logger.warning("Groq STT failed; trying fallback: %s", exc)
@@ -95,7 +118,9 @@ class VoiceService:
                     model="whisper-large-v3-turbo",
                     file=audio_file,
                     language="ar" if language == "ar" else "en",
+                    response_format="verbose_json",
                 )
+            self.last_confidence = _whisper_confidence(response)
             return response.text or ""
         finally:
             if tmp_path and os.path.exists(tmp_path):

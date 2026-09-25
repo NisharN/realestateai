@@ -49,6 +49,26 @@ celery_app.conf.update(
             "task": "app.worker.run_workflow_templates",
             "schedule": 300.0,  # every 5 minutes
         },
+        "reassign-stale-handoffs": {
+            "task": "app.worker.reassign_stale_handoffs",
+            "schedule": 60.0,
+        },
+        "send-due-followups": {
+            "task": "app.worker.send_due_followups",
+            "schedule": 300.0,
+        },
+        "retry-ingestion-errors": {
+            "task": "app.worker.retry_ingestion_errors",
+            "schedule": 120.0,
+        },
+        "poll-pull-connectors": {
+            "task": "app.worker.poll_pull_connectors",
+            "schedule": 60.0,
+        },
+        "crm-writeback": {
+            "task": "app.worker.crm_writeback",
+            "schedule": 60.0,
+        },
     },
 )
 
@@ -340,3 +360,66 @@ async def _generate_and_store_copy(
         client.table("listing_refresh_suggestions").insert(payload).execute()
     except Exception as exc:
         logger.debug("Could not store refresh suggestion: %s", exc)
+
+
+# --------------------------------------------------------------------------
+# Handoff / follow-up / ingestion timers (single-tenant: WORKSPACE_ID)
+# --------------------------------------------------------------------------
+
+@celery_app.task(name="app.worker.reassign_stale_handoffs")
+def reassign_stale_handoffs() -> int:
+    from app.modules.handoff.service import reassign_stale
+
+    return len(_run_async(reassign_stale(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.send_due_followups")
+def send_due_followups() -> int:
+    from app.modules.handoff.followups import send_due
+
+    return len(_run_async(send_due(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.retry_ingestion_errors")
+def retry_ingestion_errors() -> int:
+    from app.modules.ingestion.pipeline.processor import process_stranded, retry_errors
+
+    async def _run() -> int:
+        ws = settings.WORKSPACE_ID
+        return len(await retry_errors(ws)) + len(await process_stranded(ws))
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.worker.poll_pull_connectors")
+def poll_pull_connectors() -> int:
+    """Pull every due CRM connector, land its records, then process them."""
+    from app.modules.ingestion.connectors.crm_pull import due_pull_connectors, poll_connector
+
+    async def _run() -> int:
+        ws = settings.WORKSPACE_ID
+        landed = 0
+        for connector in await due_pull_connectors(ws):
+            result = await poll_connector(connector["id"], workspace_id=ws)
+            ids = result.get("raw_ids", [])
+            if ids:
+                process_raw_records.delay(ws, ids)
+            landed += len(ids)
+        return landed
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.worker.crm_writeback")
+def crm_writeback() -> int:
+    """Drain the lead-event outbox into CRM write-backs (idempotent via consumer_offsets)."""
+    from app.modules.ingestion.writeback import run_writeback
+
+    return _run_async(run_writeback(settings.WORKSPACE_ID))
+
+
+@celery_app.task(name="app.worker.process_raw_records")
+def process_raw_records(workspace_id: str, raw_ids: list[str]) -> int:
+    from app.modules.ingestion.pipeline.processor import process_many
+
+    return len(_run_async(process_many(raw_ids, workspace_id=workspace_id)))

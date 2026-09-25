@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,8 @@ from app.config import get_settings
 from app.database import get_lead_repository
 from app.modules.agents import extractor, scorer
 from app.modules.agents.responder import respond
+from app.modules.ingestion import events
+from app.modules.handoff import followups
 from app.modules.handoff.service import create_handoff
 from app.modules.leads.profile import lead_updates_from_state, merge
 from app.modules.store import lock_for, table
@@ -84,7 +87,7 @@ async def handle_turn(
     deadline = Deadline(total_budget)
     started = time.monotonic()
     repo = ConversationRepo(workspace_id)
-    key = idempotency_key or f"{lead_id}:{int(time.time() * 1000)}"
+    key = idempotency_key or f"{lead_id}:{uuid4().hex}"
 
     async with lock_for(f"turn:{workspace_id}:{lead_id}"):
         replay = await repo.find_message(lead_id, key)
@@ -190,6 +193,7 @@ async def _run(
         tool_results=_jsonable(tool_results), idempotency_key=key, latency_ms=latency_ms, fallbacks=fallbacks,
     )
     await _mirror_lead(state, workspace_id)
+    await _schedule_followups(state, move, workspace_id)
     return _result(state, reply, move.value, _jsonable(tool_results), latency_ms, fallbacks, ended=move in {Move.OPT_OUT, Move.HANDOFF, Move.HANDOFF_NOW})
 
 
@@ -316,6 +320,18 @@ def _reply_facts(move: Move, state: ConversationState, facts: ExtractedFacts, to
         out["area_summary"] = area.summary
         if area.median_price_psf:
             out["area_price_psf"] = f"{area.median_price_psf:,.0f}"
+        if area.travel:
+            approx = any(t.approx for t in area.travel)
+            out["area_travel"] = [
+                {"to": t.to_name_ar if state.language == "ar" else t.to_name_en, "minutes": t.minutes, "km": t.km, "approx": t.approx}
+                for t in area.travel
+            ]
+            first = area.travel[0]
+            out["area_travel_text"] = (
+                (f"حوالي {first.minutes} دقيقة إلى {first.to_name_ar}" if approx else f"{first.minutes} دقيقة إلى {first.to_name_ar}")
+                if state.language == "ar"
+                else (f"about {first.minutes} minutes to {first.to_name_en} (approx.)" if approx else f"{first.minutes} minutes to {first.to_name_en}")
+            )
     cmp = tools.get("compare")
     if cmp is not None and cmp.rows:
         out["compare"] = [r.model_dump() for r in cmp.rows]
@@ -354,6 +370,18 @@ async def _handoff_broker_name(state: ConversationState, workspace_id: str) -> s
     return (row or {}).get("broker_name") or default
 
 
+async def _schedule_followups(state: ConversationState, move: Move, workspace_id: str) -> None:
+    try:
+        if move == Move.OPT_OUT:
+            await followups.cancel_followups(state.lead_id, workspace_id=workspace_id, reason="opt_out")
+        elif move in {Move.HANDOFF, Move.HANDOFF_NOW}:
+            await followups.cancel_followups(state.lead_id, workspace_id=workspace_id, reason="handed_off")
+        elif move == Move.NURTURE:
+            await followups.schedule_followups(state.lead_id, state.band, workspace_id=workspace_id)
+    except Exception as exc:
+        logger.debug("followup scheduling skipped: %s", exc)
+
+
 async def _mirror_lead(state: ConversationState, workspace_id: str) -> None:
     try:
         repo = get_lead_repository(workspace_id)
@@ -362,6 +390,9 @@ async def _mirror_lead(state: ConversationState, workspace_id: str) -> None:
             updates = lead_updates_from_state(state)
             updates["intent_score"] = state.score
             await repo.update(state.lead_id, updates)
+            changed = [k for k in ("score", "intent_score", "stage", "status", "band") if k in updates and lead.get(k) != updates[k]]
+            if changed:
+                await events.emit(state.lead_id, "lead.scored", {"changed_fields": changed, "score": state.score, "turn": state.turn}, workspace_id=workspace_id)
     except Exception as exc:
         logger.debug("lead mirror skipped: %s", exc)
 

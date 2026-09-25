@@ -27,7 +27,7 @@ const authenticatedFetch = createAuthenticatedFetch({
   allowAnonymous: () => DEMO_MODE,
 });
 
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
@@ -424,16 +424,53 @@ export const conversationsApi = {
 };
 
 // Voice WebSocket
+export type VoiceServerMessage =
+  | { type: "ready"; session_id: string; resumed: boolean; tts: boolean; heartbeat_s: number; reply: string; history?: { role: string; text: string; created_at?: string }[] }
+  | { type: "transcript"; turn_id: string; text: string; confidence: number | null }
+  | { type: "thinking"; turn_id: string }
+  | {
+      type: "reply";
+      turn_id: string;
+      user_text: string;
+      reply: string;
+      spoken_text: string;
+      move?: string;
+      stage?: string;
+      score?: number;
+      properties?: any[];
+      area?: any;
+      handoff_id?: string | null;
+      ended?: boolean;
+      fallbacks: string[];
+      audio?: string;
+      audio_format?: string;
+      stt_error?: string;
+    }
+  | { type: "cancelled"; turn_id: string }
+  | { type: "error"; turn_id?: string; code: string; recoverable: boolean }
+  | { type: "ping" }
+  | { type: "pong" };
+
+/**
+ * Voice WS v2 client: every utterance carries a turn_id, `interrupt()` cancels the
+ * in-flight turn (barge-in), heartbeats are answered, and dropped sockets are
+ * re-opened with the same session_id so the server can replay the transcript.
+ */
 export class VoiceWebSocket {
   private ws: WebSocket | null = null;
   private leadId: string;
-  private onMessage: (data: any) => void;
-  private onError: (error: any) => void;
+  private onMessage: (data: VoiceServerMessage) => void;
+  private onError: (error: unknown) => void;
+  private sessionId: string | null = null;
+  private closed = false;
+  private retries = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  currentTurnId: string | null = null;
 
   constructor(
     leadId: string,
-    onMessage: (data: any) => void,
-    onError: (error: any) => void
+    onMessage: (data: VoiceServerMessage) => void,
+    onError: (error: unknown) => void
   ) {
     this.leadId = leadId;
     this.onMessage = onMessage;
@@ -459,14 +496,23 @@ export class VoiceWebSocket {
     const query = new URLSearchParams();
     if (token) query.set("token", token);
     if (workspaceId) query.set("workspace_id", workspaceId);
+    if (this.sessionId) query.set("session_id", this.sessionId);
+    this.closed = false;
     this.ws = new WebSocket(`${wsUrl}/api/v1/voice/conversation/${this.leadId}?${query}`);
 
-    this.ws.onopen = () => {
-      console.log("Voice WebSocket connected");
-    };
-
     this.ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      const data = JSON.parse(event.data) as VoiceServerMessage;
+      if (data.type === "ping") {
+        this.send({ type: "pong" });
+        return;
+      }
+      if (data.type === "ready") {
+        this.sessionId = data.session_id;
+        this.retries = 0;
+      }
+      if (data.type === "reply" || data.type === "cancelled") {
+        if (this.currentTurnId === data.turn_id) this.currentTurnId = null;
+      }
       this.onMessage(data);
     };
 
@@ -474,34 +520,326 @@ export class VoiceWebSocket {
       this.onError(error);
     };
 
-    this.ws.onclose = () => {
-      console.log("Voice WebSocket closed");
+    this.ws.onclose = (event) => {
+      // 44xx codes are auth/lookup rejections; anything else is a drop we resume from.
+      if (this.closed || (event.code >= 4400 && event.code < 4500) || this.retries >= 5) return;
+      const delay = Math.min(8000, 500 * 2 ** this.retries++);
+      this.reconnectTimer = setTimeout(() => void this.connect(), delay);
     };
   }
 
-  sendAudio(audioBase64: string) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(
-        JSON.stringify({
-          type: "audio",
-          data: audioBase64,
-        })
-      );
-    }
+  private send(payload: Record<string, unknown>): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(payload));
+    return true;
   }
 
-  sendText(text: string) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(
-        JSON.stringify({
-          type: "text",
-          text,
-        })
-      );
-    }
+  private newTurn(): string {
+    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    this.currentTurnId = id;
+    return id;
+  }
+
+  sendAudio(audioBase64: string): string | null {
+    const turnId = this.newTurn();
+    return this.send({ type: "audio", data: audioBase64, turn_id: turnId }) ? turnId : null;
+  }
+
+  sendText(text: string, wantAudio = false): string | null {
+    const turnId = this.newTurn();
+    return this.send({ type: "text", text, turn_id: turnId, want_audio: wantAudio }) ? turnId : null;
+  }
+
+  /** Barge-in: cancel whatever the server is doing for the current turn. */
+  interrupt() {
+    if (this.currentTurnId) this.send({ type: "interrupt", turn_id: this.currentTurnId });
+    this.currentTurnId = null;
   }
 
   disconnect() {
+    this.closed = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.ws?.close();
   }
 }
+
+// Broker workspace (Broker Today, pipeline, lead detail) — /api/v1/broker
+export interface BrokerLeadSummary {
+  id: string;
+  name: string;
+  phone: string | null;
+  language: string;
+  score: number;
+  band: string | null;
+  stage: string;
+  purpose: string | null;
+  budget_min_aed: number | null;
+  budget_max_aed: number | null;
+  budget_period: string | null;
+  areas: string[];
+  property_type: string | null;
+  timeline: string | null;
+  source: string | null;
+  assigned_broker: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BrokerHandoff {
+  id: string;
+  lead_id: string;
+  broker_id: string | null;
+  broker_name: string | null;
+  status: "pending" | "accepted" | "declined" | "escalated" | "expired" | string;
+  reason: string | null;
+  score: number | null;
+  band: string | null;
+  language: string | null;
+  slot_text: string | null;
+  created_at: string | null;
+  reassign_after: string | null;
+  accepted_at: string | null;
+  reassigned_count: number | null;
+  routing_reasons: string[] | null;
+  decline_reason: string | null;
+}
+
+export interface BrokerBrief {
+  headline: string;
+  band: string;
+  score: number;
+  next_step: string;
+  facts?: Record<string, unknown>;
+  objections?: string[];
+  liked?: string[];
+  disliked?: string[];
+  score_reasons?: string[];
+  [key: string]: unknown;
+}
+
+export interface BrokerFollowup {
+  id: string;
+  lead_id: string;
+  touch: number;
+  template_key: string;
+  due_at: string;
+  status: string;
+  lead_name?: string;
+  lead_band?: string | null;
+}
+
+export interface BrokerToday {
+  date: string;
+  broker_id: string | null;
+  counts: {
+    new_handoffs: number;
+    accepted: number;
+    hot_leads: number;
+    viewings: number;
+    followups_due: number;
+    escalated: number;
+  };
+  new_handoffs: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
+  accepted_handoffs: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
+  hot_leads: BrokerLeadSummary[];
+  viewings: Record<string, unknown>[];
+  followups: BrokerFollowup[];
+  escalated: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
+}
+
+export interface BrokerPipeline {
+  broker_id: string | null;
+  stages: { stage: string; count: number; leads: BrokerLeadSummary[] }[];
+}
+
+export type TimelineItem =
+  | { at: string | null; kind: "event"; type: string; payload: Record<string, unknown> | null }
+  | { at: string | null; kind: "change"; field: string; old: unknown; new: unknown; by: string | null }
+  | { at: string | null; kind: "message"; role: string; text: string; channel: string | null };
+
+export interface BrokerLeadDetail {
+  lead: BrokerLeadSummary & {
+    email?: string | null;
+    payment?: string | null;
+    bedrooms_min?: number | null;
+    score_reasons?: string[] | null;
+    consent?: Record<string, unknown> | null;
+    notes?: string | null;
+    initial_message?: string | null;
+    community_ids?: string[] | null;
+    property_types?: string[] | null;
+  };
+  brief: BrokerBrief | null;
+  handoff: BrokerHandoff | null;
+  sources: Record<string, unknown>[];
+  followups: BrokerFollowup[];
+  timeline: TimelineItem[];
+}
+
+export interface LeadPatch {
+  purpose?: string;
+  budget_min_aed?: number;
+  budget_max_aed?: number;
+  budget_period?: string;
+  community_ids?: string[];
+  property_types?: string[];
+  timeline?: string;
+  payment?: string;
+  stage?: string;
+  notes?: string;
+}
+
+const withBroker = (path: string, brokerId?: string | null) =>
+  brokerId ? `${path}?broker_id=${encodeURIComponent(brokerId)}` : path;
+
+export const brokerApi = {
+  today: (brokerId?: string | null) => fetchApi<BrokerToday>(withBroker("/api/v1/broker/today", brokerId)),
+  pipeline: (brokerId?: string | null) =>
+    fetchApi<BrokerPipeline>(withBroker("/api/v1/broker/pipeline", brokerId)),
+  lead: (id: string) => fetchApi<BrokerLeadDetail>(`/api/v1/broker/leads/${id}`),
+  patchLead: (id: string, patch: LeadPatch) =>
+    fetchApi<{ lead: BrokerLeadSummary; changed: string[] }>(`/api/v1/broker/leads/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  accept: (handoffId: string, brokerId?: string | null) =>
+    fetchApi<BrokerHandoff>(`/api/v1/broker/handoffs/${handoffId}/accept`, {
+      method: "POST",
+      body: JSON.stringify(brokerId ? { broker_id: brokerId } : {}),
+    }),
+  decline: (handoffId: string, input: { broker_id?: string | null; reason?: string }) =>
+    fetchApi<BrokerHandoff>(`/api/v1/broker/handoffs/${handoffId}/decline`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  followups: (brokerId?: string | null) =>
+    fetchApi<BrokerFollowup[]>(withBroker("/api/v1/broker/followups", brokerId)),
+};
+
+// Admin: connectors, field maps, review queue, data health — /api/v1/admin
+export interface Connector {
+  id: string;
+  type: string;
+  mode: "pull" | "push";
+  display_name: string;
+  status: "active" | "paused" | "disabled";
+  schedule_seconds: number | null;
+  config: Record<string, unknown>;
+  has_secret: boolean;
+  secret?: string;
+  webhook_path?: string;
+  cursor?: string | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
+  created_at?: string;
+}
+
+export interface FieldMapEntry {
+  source_field: string;
+  target_field: string | null;
+  transform?: string | null;
+  confidence?: number;
+  approved_at?: string | null;
+}
+
+export interface ReviewItem {
+  id: string;
+  raw_record_id: string;
+  reason: string;
+  status: string;
+  suggested_fix: Record<string, unknown> | null;
+  draft: Record<string, unknown> | null;
+  payload: Record<string, unknown> | null;
+  record_status: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface DataHealth {
+  connectors: {
+    connector_id: string;
+    type: string;
+    display_name: string | null;
+    status: string | null;
+    consecutive_failures: number;
+    last_run_at: string | null;
+    last_success_at: string | null;
+    records: number;
+    published: number;
+    review: number;
+    error: number;
+    publish_rate: number | null;
+    [key: string]: unknown;
+  }[];
+  totals: Record<string, number>;
+  review_open: number;
+  events_total: number;
+}
+
+export interface CsvUploadResult {
+  connector_id: string;
+  rows: number;
+  landed: number;
+  duplicates: number;
+  headers: string[];
+  field_map_suggestions: FieldMapEntry[];
+  processed: number;
+  published: number;
+  created: number;
+  review: number;
+}
+
+export const adminApi = {
+  connectors: () => fetchApi<Connector[]>("/api/v1/admin/connectors"),
+  createConnector: (input: {
+    type: string;
+    display_name?: string;
+    schedule_seconds?: number;
+    config?: Record<string, unknown>;
+    credential?: string;
+  }) =>
+    fetchApi<Connector>("/api/v1/admin/connectors", { method: "POST", body: JSON.stringify(input) }),
+  patchConnector: (
+    id: string,
+    patch: { status?: Connector["status"]; rotate_secret?: boolean; credential?: string; schedule_seconds?: number }
+  ) => fetchApi<Connector>(`/api/v1/admin/connectors/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  runConnector: (id: string) =>
+    fetchApi<{ fetched?: number; landed?: number; processed: number; published: number; error?: string }>(
+      `/api/v1/admin/connectors/${id}/run`,
+      { method: "POST" }
+    ),
+  fieldMap: (id: string) =>
+    fetchApi<{ connector_id: string; approved: FieldMapEntry[]; suggested: FieldMapEntry[] }>(
+      `/api/v1/admin/connectors/${id}/field-map`
+    ),
+  putFieldMap: (id: string, mappings: FieldMapEntry[]) =>
+    fetchApi<{ connector_id: string; approved: number }>(`/api/v1/admin/connectors/${id}/field-map`, {
+      method: "PUT",
+      body: JSON.stringify({ mappings: mappings.map(({ source_field, target_field, transform }) => ({ source_field, target_field, transform })) }),
+    }),
+  reviewQueue: (resolved = false) =>
+    fetchApi<ReviewItem[]>(`/api/v1/admin/review-queue?resolved=${resolved}`),
+  resolveReview: (id: string, input: { action: "retry" | "discard"; fixed_payload?: Record<string, unknown> }) =>
+    fetchApi<{ status: string; lead_id?: string | null }>(`/api/v1/admin/review-queue/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  retryErrors: () =>
+    fetchApi<{ retried: number; published: number }>("/api/v1/admin/pipeline/retry-errors", { method: "POST" }),
+  dataHealth: () => fetchApi<DataHealth>("/api/v1/admin/data-health"),
+  uploadCsv: async (file: File, connectorId?: string): Promise<ApiResponse<CsvUploadResult>> => {
+    const form = new FormData();
+    form.append("file", file);
+    const query = connectorId ? `?connector_id=${encodeURIComponent(connectorId)}` : "";
+    try {
+      const r = await authenticatedFetch(`/api/v1/ingest/csv${query}`, { method: "POST", body: form });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) return { error: normalizeApiError(body) };
+      return { data: body };
+    } catch {
+      return { error: "Network error" };
+    }
+  },
+};

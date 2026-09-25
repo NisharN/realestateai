@@ -156,6 +156,20 @@ class LeadRepository:
         result = self.table.select("*").eq("workspace_id", self.workspace_id).eq("phone", phone).maybe_single().execute()
         return result.data if result.data else None
 
+    async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        result = self.table.select("*").eq("workspace_id", self.workspace_id).ilike("email", email).limit(1).execute()
+        return result.data[0] if result.data else None
+
+    async def list_all(self, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        result = (
+            self.table.select("*")
+            .eq("workspace_id", self.workspace_id)
+            .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+        return result.data or []
+
     async def update(self, lead_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         result = self.table.update(updates).eq("workspace_id", self.workspace_id).eq("id", lead_id).execute()
         return result.data[0] if result.data else None
