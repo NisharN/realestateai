@@ -23,6 +23,11 @@ def _admin(context: RequestContext) -> None:
     context.require_roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
 
 
+def _member(context: RequestContext) -> None:
+    """Connections, CRM sync and routines are a broker's own setup — every workspace member can use them."""
+    context.require_roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.AGENT)
+
+
 @router.get("/overview")
 async def overview(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _admin(context)
@@ -55,7 +60,7 @@ async def list_integrations(context: RequestContext = Depends(get_request_contex
 
 @router.get("/jobs")
 async def list_jobs(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
-    _admin(context)
+    _member(context)
     return await jobs.list_jobs(context.workspace_id)
 
 
@@ -66,7 +71,7 @@ class JobPatch(BaseModel):
 
 @router.patch("/jobs/{job_id}")
 async def patch_job(job_id: str, body: JobPatch, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await jobs.update_job(context.workspace_id, job_id, enabled=body.enabled, interval_s=body.interval_s)
     except KeyError:
@@ -75,7 +80,7 @@ async def patch_job(job_id: str, body: JobPatch, context: RequestContext = Depen
 
 @router.post("/jobs/{job_id}/run")
 async def run_job_now(job_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await jobs.run_job(context.workspace_id, job_id, trigger="manual", actor=context.user_id)
     except KeyError:
@@ -216,20 +221,20 @@ def _bad(exc: Exception) -> HTTPException:
 
 @router.get("/connections/catalog")
 async def connections_catalog(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
-    _admin(context)
+    _member(context)
     return connections.catalog()
 
 
 @router.get("/connections")
 async def list_connections(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     rows = await connections.list_connections(context.workspace_id)
     return {"connections": rows, "counts": connections.counts_by_health(rows)}
 
 
 @router.post("/connections", status_code=201)
 async def create_connection(body: connections.ConnectionIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await connections.create_connection(context.workspace_id, body, actor=context.user_id)
     except ValueError as exc:
@@ -238,7 +243,7 @@ async def create_connection(body: connections.ConnectionIn, context: RequestCont
 
 @router.patch("/connections/{connection_id}")
 async def patch_connection(connection_id: str, body: connections.ConnectionPatch, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         row = await connections.patch_connection(context.workspace_id, connection_id, body)
     except ValueError as exc:
@@ -250,13 +255,13 @@ async def patch_connection(connection_id: str, body: connections.ConnectionPatch
 
 @router.delete("/connections/{connection_id}")
 async def delete_connection(connection_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, bool]:
-    _admin(context)
+    _member(context)
     return {"deleted": await connections.delete_connection(context.workspace_id, connection_id)}
 
 
 @router.post("/connections/{connection_id}/test")
 async def test_connection(connection_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await connections.test_connection(context.workspace_id, connection_id)
     except LookupError:
@@ -265,7 +270,7 @@ async def test_connection(connection_id: str, context: RequestContext = Depends(
 
 @router.post("/connections/{connection_id}/webhook/test")
 async def test_connection_webhook(connection_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await connections.test_webhook(context.workspace_id, connection_id)
     except LookupError:
@@ -275,7 +280,7 @@ async def test_connection_webhook(connection_id: str, context: RequestContext = 
 @router.get("/connections/{connection_id}/webhook")
 async def reveal_connection_webhook(connection_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     """Owner/admin-only: returns the inbound URL and signing secret to paste into the provider."""
-    _admin(context)
+    _member(context)
     out = await connections.reveal_webhook(context.workspace_id, connection_id)
     if not out:
         raise HTTPException(status_code=404, detail="not_found")
@@ -314,19 +319,19 @@ async def inbound_connection_webhook(
 
 @router.get("/routines/catalog")
 async def routines_catalog(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     return routines.step_catalog()
 
 
 @router.get("/routines")
 async def list_routines(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
-    _admin(context)
+    _member(context)
     return await routines.list_routines(context.workspace_id)
 
 
 @router.post("/routines", status_code=201)
 async def create_routine(body: routines.RoutineIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await routines.create_routine(context.workspace_id, body, actor=context.user_id)
     except ValueError as exc:
@@ -339,7 +344,7 @@ class TemplateIn(BaseModel):
 
 @router.post("/routines/from-template", status_code=201)
 async def routine_from_template(body: TemplateIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await routines.instantiate_template(context.workspace_id, body.template_id, actor=context.user_id)
     except LookupError:
@@ -354,13 +359,13 @@ async def list_routine_runs(
     limit: int = Query(50, ge=1, le=200),
     context: RequestContext = Depends(get_request_context),
 ) -> list[dict[str, Any]]:
-    _admin(context)
+    _member(context)
     return await routines.list_runs(context.workspace_id, routine_id=routine_id, limit=limit)
 
 
 @router.patch("/routines/{routine_id}")
 async def patch_routine(routine_id: str, body: routines.RoutinePatch, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         row = await routines.patch_routine(context.workspace_id, routine_id, body)
     except ValueError as exc:
@@ -372,13 +377,13 @@ async def patch_routine(routine_id: str, body: routines.RoutinePatch, context: R
 
 @router.delete("/routines/{routine_id}")
 async def delete_routine(routine_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, bool]:
-    _admin(context)
+    _member(context)
     return {"deleted": await routines.delete_routine(context.workspace_id, routine_id)}
 
 
 @router.post("/routines/{routine_id}/run")
 async def run_routine_now(routine_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
-    _admin(context)
+    _member(context)
     try:
         return await routines.run_routine(context.workspace_id, routine_id, trigger="manual", actor=context.user_id)
     except LookupError:

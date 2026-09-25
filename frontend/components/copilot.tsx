@@ -28,7 +28,7 @@ export function Copilot({ compact = false, initialQuestion }: { compact?: boolea
   const [text, setText] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -74,9 +74,9 @@ export function Copilot({ compact = false, initialQuestion }: { compact?: boolea
     });
     if (r.data) {
       const run = await coworkApi.runRoutine(r.data.id);
-      setNotice(run.data ? `${action.label}: done for ${run.data.summary.leads ?? action.lead_ids.length} leads.` : run.error ?? "Run failed");
+      setNotice(run.data ? { text: `${action.label}: done for ${run.data.summary.leads ?? action.lead_ids.length} leads.`, ok: true } : { text: run.error ?? "Run failed", ok: false });
     } else {
-      setNotice(r.error ?? "Couldn't run that action");
+      setNotice({ text: r.error ?? "Couldn't run that action", ok: false });
     }
     setBusy(false);
   };
@@ -119,7 +119,11 @@ export function Copilot({ compact = false, initialQuestion }: { compact?: boolea
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
           </p>
         )}
-        {notice && <p role="status" className="rounded-xl bg-success-soft px-3 py-2 text-xs text-success">{notice}</p>}
+        {notice && (
+          <p role={notice.ok ? "status" : "alert"} className={`rounded-xl px-3 py-2 text-xs ${notice.ok ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
+            {notice.text}
+          </p>
+        )}
         <div ref={bottom} />
       </div>
 
