@@ -18,6 +18,13 @@ from typing import Any, Dict, Iterator, List
 
 from app.modules.geo.communities import COMMUNITIES
 
+TIMELINE_LABEL = {
+    "immediate": "ASAP", "1_3_months": "within 3 months", "3_6_months": "3–6 months",
+    "6_12_months": "6–12 months", "just_browsing": "just browsing",
+}
+PAYMENT_LABEL = {"cash": "cash", "mortgage": "mortgage", "undecided": "undecided"}
+OBJECTIONS = ["price too high", "prefers a different tower", "wants sea view", "service charges", "waiting on mortgage"]
+
 FIRST_NAMES_EN = [
     "Ahmed", "Fatima", "Omar", "Layla", "Mariam", "Khalid", "Noor", "Yousef", "Sara", "Hamad",
     "Priya", "Rahul", "Anita", "Vikram", "James", "Emma", "Oliver", "Sophie", "Chen", "Mei",
@@ -173,6 +180,45 @@ def scale_leads(count: int, seed: str = "scale-leads-v1") -> Iterator[Dict[str, 
         }
 
 
+def _scale_brief(lead: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
+    """Template-shaped broker brief (same keys as ``BrokerBrief``) for a generated lead."""
+    name = f"{lead['first_name']} {lead['last_name']}"
+    area = lead["area_preference"][0]
+    beds, ptype, purpose = lead["bedrooms_min"], lead["property_type"], lead["purpose"]
+    per = " per year" if purpose == "rent" else ""
+    budget = f"AED {lead['budget_min_aed']:,.0f}–{lead['budget_max_aed']:,.0f}{per}"
+    headline = f"{name}: {purpose} {beds}BR {ptype} in {area}, {budget}"
+    timeline = TIMELINE_LABEL.get(lead["timeline"], lead["timeline"])
+    payment = PAYMENT_LABEL.get(lead["payment"], lead["payment"])
+    reasons = [f"budget stated ({budget})", f"area fixed ({area})", f"timeline {timeline}"]
+    if lead["payment"] == "cash":
+        reasons.append("cash buyer")
+    objections = [] if rng.random() < 0.7 else [rng.choice(OBJECTIONS)]
+    next_step = "Call to arrange a viewing" if lead["stage"] != "handed_off" else "Introduce yourself and confirm the brief"
+    return {
+        "headline": headline,
+        "profile": {
+            "purpose": purpose, "property_type": ptype, "bedrooms": beds, "area": [area],
+            "timeline_label": timeline, "payment_label": payment,
+        },
+        "budget_text": budget,
+        "score": lead["score"],
+        "band": lead["band"],
+        "score_reasons": reasons,
+        "liked": [],
+        "rejected": [],
+        "objections": objections,
+        "next_step": next_step,
+        "language": lead["preferred_language"],
+        "suggested_opening": (
+            f"Hi {name}, this is {{broker}} from {{brokerage}}. You were looking at {beds}BR {ptype}s in {area} "
+            f"around {budget} — I'd love to line up a viewing. When suits you?"
+        ),
+        "summary": f"{headline}. Timeline: {timeline}. Payment: {payment}. Score {lead['score']}/100 ({lead['band']}). Next: {next_step}",
+        "generated_by": "template",
+    }
+
+
 def scale_related(leads: List[Dict[str, Any]], seed: str = "scale-related-v1") -> Dict[str, List[Dict[str, Any]]]:
     """Handoffs, viewings and follow-ups consistent with each lead's stage."""
     rng = random.Random(seed)
@@ -195,7 +241,7 @@ def scale_related(leads: List[Dict[str, Any]], seed: str = "scale-related-v1") -
                 "status": h_status,
                 "reason": "qualified",
                 "routing_reasons": ["language match", "community specialist"],
-                "brief": {"summary": lead["initial_message"], "language": lead["preferred_language"]},
+                "brief": _scale_brief(lead, rng),
                 "score": lead["score"],
                 "band": lead["band"],
                 "language": lead["preferred_language"],

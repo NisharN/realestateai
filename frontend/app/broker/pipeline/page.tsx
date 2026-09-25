@@ -75,7 +75,7 @@ export default function PipelinePage() {
                   {STAGE_LABELS[s.stage] ?? s.stage}
                   <span className="rounded-full bg-white px-2 py-0.5 text-xs">{s.count}</span>
                 </h2>
-                <div className="grid gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   {s.leads.length === 0 ? (
                     <p className="text-xs text-slate-500">Empty</p>
                   ) : (
