@@ -38,16 +38,16 @@ function MicButton({ t, voice, disabled }: { t: Strings; voice: VoiceAgent; disa
       data-voice-status={voice.status}
       className={cn(
         "relative shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition",
-        listening && "bg-red-500 text-white",
+        listening && "bg-danger text-white",
         speaking && "bg-brand text-brand-foreground",
-        !listening && !speaking && "text-muted-foreground hover:text-brand hover:bg-brand/10",
+        !listening && !speaking && "text-muted-foreground hover:text-foreground hover:bg-muted",
         (disabled || busy) && "opacity-60",
       )}
     >
       {listening && (
         <span
           aria-hidden
-          className="absolute inset-0 rounded-full bg-red-500/40"
+          className="absolute inset-0 rounded-full bg-danger/35"
           style={{ transform: `scale(${1 + voice.level * 0.9})`, transition: "transform 80ms linear" }}
         />
       )}
@@ -84,16 +84,16 @@ export function Composer({
   };
 
   return (
-    <div className="relative z-20 bg-card border-t border-border">
+    <div className="relative z-20 bg-gradient-to-t from-canvas via-canvas to-transparent pt-2">
       {showQuickReplies && (
-        <div className="px-4 pt-3">
+        <div className="px-4 pt-1 sm:px-6">
           <div className="flex flex-wrap gap-2 max-w-3xl mx-auto">
             {t.quickReplies.map((reply) => (
               <button
                 key={reply}
                 type="button"
                 onClick={() => onSend(reply)}
-                className="px-3 py-1.5 bg-surface border border-border text-muted-foreground text-xs rounded-full hover:border-brand/40 hover:text-foreground transition"
+                className="px-3 py-1.5 bg-card border border-border text-foreground/80 text-[13px] rounded-full hover:border-ink/30 hover:text-foreground transition"
               >
                 {reply}
               </button>
@@ -103,19 +103,19 @@ export function Composer({
       )}
 
       {(status || voice.error) && (
-        <div className="px-4 pt-3">
+        <div className="px-4 pt-3 sm:px-6">
           <div className="max-w-3xl mx-auto flex items-center gap-2 text-xs" role="status" aria-live="polite">
             {voice.error ? (
-              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:border-amber-900">
+              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-soft text-warning border border-warning/20">
                 <span className="flex-1">{t.voiceErrors[voice.error.code] ?? t.voiceErrors.unknown}</span>
-                <button type="button" onClick={voice.dismissError} aria-label={t.close} className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900">
+                <button type="button" onClick={voice.dismissError} aria-label={t.close} className="p-1 rounded-md hover:bg-warning/10">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
               <>
                 <span className="flex items-center gap-2 text-muted-foreground">
-                  {voice.status === "listening" && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
+                  {voice.status === "listening" && <span className="w-2 h-2 rounded-full bg-danger animate-pulse" />}
                   {(voice.status === "thinking" || voice.status === "sending" || voice.status === "connecting") && (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   )}
@@ -140,12 +140,12 @@ export function Composer({
           e.preventDefault();
           submit();
         }}
-        className="px-4 py-3"
+        className="px-4 pb-4 pt-3 sm:px-6"
       >
         <div
           className={cn(
-            "flex items-end gap-1.5 max-w-3xl mx-auto rounded-2xl border bg-card px-2 py-1.5 shadow-card transition focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15",
-            voice.status === "listening" ? "border-red-400/60" : "border-border",
+            "flex items-end gap-1.5 max-w-3xl mx-auto rounded-2xl border bg-card px-2 py-1.5 shadow-composer transition focus-within:border-ink/30",
+            voice.status === "listening" ? "border-danger/50" : "border-border",
           )}
         >
           <textarea
@@ -161,7 +161,7 @@ export function Composer({
             }}
             placeholder={voice.status === "listening" ? t.listening : t.inputPlaceholder}
             aria-label={t.inputPlaceholder}
-            className="flex-1 max-h-40 min-h-[2.5rem] resize-none bg-transparent border-0 px-3 py-2 text-sm focus:outline-none placeholder:text-muted-foreground"
+            className="flex-1 max-h-40 min-h-[2.5rem] resize-none bg-transparent border-0 px-3 py-2 text-[15px] focus:outline-none placeholder:text-muted-foreground/80"
           />
 
           <MicButton t={t} voice={voice} disabled={disabled && !voiceActive} />
@@ -172,7 +172,7 @@ export function Composer({
             aria-label={t.send}
             className={cn(
               "shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition",
-              canSend ? "bg-brand text-brand-foreground hover:opacity-90" : "bg-muted text-muted-foreground",
+              canSend ? "bg-ink text-white hover:bg-ink/90" : "bg-muted text-muted-foreground/60",
             )}
           >
             <ArrowUp className="w-5 h-5" />

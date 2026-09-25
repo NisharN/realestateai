@@ -79,15 +79,17 @@ module.exports = {
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         arabic: ["var(--font-arabic)", "Segoe UI", "Tahoma", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
       },
       boxShadow: {
-        card: "0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06)",
-        "card-hover": "0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 4px -1px rgb(15 23 42 / 0.04)",
-        pop: "0 12px 32px -8px rgb(15 23 42 / 0.18)",
+        card: "0 1px 2px 0 rgb(40 30 20 / 0.04)",
+        "card-hover": "0 6px 16px -6px rgb(40 30 20 / 0.12), 0 1px 2px 0 rgb(40 30 20 / 0.04)",
+        pop: "0 16px 40px -12px rgb(40 30 20 / 0.22), 0 2px 6px -2px rgb(40 30 20 / 0.08)",
+        composer: "0 0 0 1px hsl(var(--border)), 0 8px 24px -12px rgb(40 30 20 / 0.18)",
       },
       backgroundImage: {
         "brand-gradient": "linear-gradient(135deg, hsl(var(--brand)), hsl(var(--brand-2)))",
-        "ink-gradient": "linear-gradient(160deg, hsl(var(--ink)) 0%, hsl(222 47% 16%) 100%)",
+        "ink-gradient": "linear-gradient(160deg, hsl(var(--ink)) 0%, hsl(24 10% 18%) 100%)",
       },
       borderRadius: {
         lg: "var(--radius)",

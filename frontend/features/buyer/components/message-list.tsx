@@ -1,15 +1,23 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Bot, Loader2, User } from "lucide-react";
+import { Building2 } from "lucide-react";
 import type { Strings } from "../i18n";
 import { cn, type Language, type Message, type Property } from "../types";
 import { AreaCard } from "./area-card";
 import { PropertyCard } from "./property-card";
 
+function AssistantMark() {
+  return (
+    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink" aria-hidden>
+      <Building2 className="h-3.5 w-3.5 text-white" />
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
+  first,
   t,
   lang,
   onViewMap,
@@ -17,6 +25,7 @@ function MessageBubble({
   busy,
 }: {
   message: Message;
+  first: boolean;
   t: Strings;
   lang: Language;
   onViewMap: (p: Property, all: Property[]) => void;
@@ -25,34 +34,38 @@ function MessageBubble({
 }) {
   const isUser = message.role === "user";
   const lines = message.content.split("\n");
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}
-      data-role={message.role}
-    >
-      <div
-        className={cn(
-          "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-          isUser ? "bg-muted" : "bg-brand",
-        )}
-      >
-        {isUser ? <User className="w-4 h-4 text-muted-foreground" /> : <Bot className="w-4 h-4 text-gold" />}
-      </div>
+  const time = message.timestamp.toLocaleTimeString(lang === "ar" ? "ar-AE" : [], { hour: "2-digit", minute: "2-digit" });
 
-      <div className={cn("max-w-[80%] space-y-3 flex flex-col", isUser ? "items-end" : "items-start")}>
-        <div
-          dir="auto"
-          className={cn(
-            "px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
-            isUser
-              ? "bg-brand text-brand-foreground rounded-ee-md"
-              : "bg-card border border-border text-foreground rounded-es-md shadow-card",
-          )}
-        >
+  if (isUser) {
+    return (
+      <div className="group flex justify-end" data-role={message.role}>
+        <div className="max-w-[78%]">
+          <div dir="auto" className="rounded-2xl rounded-ee-md bg-ink px-4 py-2.5 text-[15px] leading-relaxed text-white">
+            {lines.map((line, i) => (
+              <span key={i}>
+                {line}
+                {i < lines.length - 1 && <br />}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-end text-[11px] text-muted-foreground transition-colors [@media(hover:hover)]:text-muted-foreground/0 [@media(hover:hover)]:group-hover:text-muted-foreground" dir="ltr">
+            {time}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex gap-3" data-role={message.role}>
+      <AssistantMark />
+      <div className="min-w-0 flex-1 space-y-4">
+        <div dir="auto" className="max-w-[68ch] text-[15px] leading-[1.65] text-foreground">
           {lines.map((line, i) => (
-            <span key={i}>
+            <span
+              key={i}
+              className={cn(first && i === 0 && line.trim() && "font-display text-[22px] leading-[1.3] text-foreground")}
+            >
               {line}
               {i < lines.length - 1 && <br />}
             </span>
@@ -62,7 +75,7 @@ function MessageBubble({
         {message.area && <AreaCard area={message.area} t={t} lang={lang} />}
 
         {message.properties && message.properties.length > 0 && (
-          <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {message.properties.map((prop) => (
               <PropertyCard
                 key={prop.id}
@@ -77,11 +90,11 @@ function MessageBubble({
           </div>
         )}
 
-        <span className="text-xs text-muted-foreground px-1" dir="ltr">
-          {message.timestamp.toLocaleTimeString(lang === "ar" ? "ar-AE" : [], { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        <p className="text-[11px] text-muted-foreground transition-colors [@media(hover:hover)]:text-muted-foreground/0 [@media(hover:hover)]:group-hover:text-muted-foreground" dir="ltr">
+          {time}
+        </p>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -106,26 +119,24 @@ export function MessageList({
   }, [messages, isLoading]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6" role="log" aria-live="polite">
-      <div className="mx-auto max-w-4xl space-y-5">
-      <AnimatePresence>
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} t={t} lang={lang} onViewMap={onViewMap} onAsk={onAsk} busy={isLoading} />
+    <div className="flex-1 overflow-y-auto px-4 py-8 sm:px-6" role="log" aria-live="polite">
+      <div className="mx-auto max-w-3xl space-y-7">
+        {messages.map((m, i) => (
+          <MessageBubble key={m.id} message={m} first={i === 0 && m.role === "assistant"} t={t} lang={lang} onViewMap={onViewMap} onAsk={onAsk} busy={isLoading} />
         ))}
-      </AnimatePresence>
 
-      {isLoading && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
-            <Bot className="w-4 h-4 text-gold" />
+        {isLoading && (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground" role="status">
+            <AssistantMark />
+            <span className="sr-only">{t.thinking}</span>
+            <span className="flex items-center gap-1" aria-hidden="true">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+            </span>
           </div>
-          <div className="flex items-center gap-2 rounded-2xl rounded-es-md border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground shadow-card">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            {t.thinking}
-          </div>
-        </motion.div>
-      )}
-      <div ref={endRef} />
+        )}
+        <div ref={endRef} />
       </div>
     </div>
   );
