@@ -423,6 +423,15 @@
   turns:
     - say: "I want to invest, what areas give good rental yield?"
       slots: {purpose: invest}
+      move: answer_area
+      reply_contains: ["yield"]
+- id: en_why_about_area_while_asked_budget
+  turns:
+    - say: "buy"
+    - say: "marina"
+    - say: "why do you ask about the area?"
+      move: ask_next_field
+      reply_contains: ["areas you like", "apartment, villa"]
 - id: en_bedroom_range_not_budget
   turns:
     - say: "buy"

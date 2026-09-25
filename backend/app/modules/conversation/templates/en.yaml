@@ -17,6 +17,12 @@ answer_area:
   - "{area_name} is {area_summary} Typical prices are around AED {area_price_psf} per sq ft. Shall I show you options there?"
   - "{area_name} is {area_summary} It is {area_travel_text}. Shall I show you options there?"
   - "{area_name} is a popular choice. Would you like me to pull some listings there so you can see what your budget gets you?"
+answer_area_ranking:
+  - "Based on our current listings, the strongest gross rental yields are in {ranking_text}. To narrow it to real options, {next_question_lower}"
+  - "From live stock, the highest gross yields right now are {ranking_text}. {next_question}"
+answer_area_ranking_empty:
+  - "Yields vary a lot by community and price point, so I'd rather show you real numbers from live listings than guess. {next_question}"
+  - "Good question — I quote yields only from live listings, and I need a bit more to narrow it down. {next_question}"
 answer_property:
   - "{property_title} in {property_area}: {property_bedrooms} bedroom {property_type}, {property_size} sq ft, listed at AED {property_price}. Would you like to see it?"
   - "Happy to help — which of the properties I showed would you like to know more about?"

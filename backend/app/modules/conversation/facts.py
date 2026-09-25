@@ -51,6 +51,8 @@ class ExtractedFacts(BaseModel):
     reactions: list[Reaction] = Field(default_factory=list)
     objection: Objection | None = None
     asks_why: bool = False
+    why_field: str | None = None  # slot the buyer is asking about ("why do you need my budget?")
+    wants_area_recommendation: bool = False  # "which areas give good yield?" with no area named
     confidence: float = 0.0
     # Filled by the rule extractor / merge step, never by the LLM directly:
     budget_ambiguous: bool = False

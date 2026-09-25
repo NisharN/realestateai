@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { leadsApi, type AreaAnswer, type LeadIngestInput } from "@/lib/api";
 import { STRINGS, detectLanguage } from "./i18n";
 import { EMPTY_INTAKE, toProperty, type IntakeForm, type Language, type Message, type Property } from "./types";
@@ -102,7 +102,7 @@ export function useBuyerChat(initialLanguage: Language = "en") {
       setIsLoading(true);
       try {
         if (!leadId) {
-          const ingest = await leadsApi.ingest(toIngestInput(intake, lang, trimmed));
+          const ingest = await leadsApi.ingest(toIngestInput(intake, lang));
           if (!ingest.data) {
             push(assistantMessage(t.backendError(ingest.error ?? "unknown")));
             return false;
@@ -126,7 +126,7 @@ export function useBuyerChat(initialLanguage: Language = "en") {
     async (firstMessage: string) => {
       setIsLoading(true);
       try {
-        const result = await leadsApi.ingest(toIngestInput(intake, language, firstMessage.trim()));
+        const result = await leadsApi.ingest(toIngestInput(intake, language));
         if (result.error || !result.data) {
           push(assistantMessage(t.registerError(result.error ?? "unknown")));
           return;
@@ -145,6 +145,38 @@ export function useBuyerChat(initialLanguage: Language = "en") {
       }
     },
     [continueChat, intake, language, push, t],
+  );
+
+  const leadIdRef = useRef<string | null>(null);
+  leadIdRef.current = leadId;
+  const leadPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  /** Lead the voice socket binds to; registers one from the intake form on first use. */
+  const ensureLead = useCallback(async (): Promise<string | null> => {
+    if (leadIdRef.current) return leadIdRef.current;
+    if (leadPromiseRef.current) return leadPromiseRef.current;
+    leadPromiseRef.current = (async () => {
+      const result = await leadsApi.ingest(toIngestInput(intake, language));
+      if (result.error || !result.data) {
+        push(assistantMessage(t.registerError(result.error ?? "unknown")));
+        return null;
+      }
+      const id = result.data.lead_id;
+      leadIdRef.current = id;
+      setLeadId(id);
+      setShowIntake(false);
+      return id;
+    })().finally(() => {
+      leadPromiseRef.current = null;
+    });
+    return leadPromiseRef.current;
+  }, [intake, language, push, t]);
+
+  const onVoiceTranscript = useCallback(
+    (text: string) => {
+      push({ id: nextId(), role: "user", content: text, timestamp: new Date() });
+    },
+    [push],
   );
 
   const onVoiceReply = useCallback(
@@ -179,5 +211,7 @@ export function useBuyerChat(initialLanguage: Language = "en") {
     sendMessage,
     submitIntake,
     onVoiceReply,
+    onVoiceTranscript,
+    ensureLead,
   };
 }

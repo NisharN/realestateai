@@ -25,7 +25,7 @@ MOVE_INSTRUCTIONS: dict[Move, str] = {
     Move.GREETING: "Greet briefly and ask the first question given in FACTS.next_question.",
     Move.CLARIFY_BUDGET: "Ask the clarifying budget question in FACTS.budget_question, phrased naturally.",
     Move.CLARIFY_AREA: "Ask which community the buyer meant; offer 3 example communities from FACTS.examples.",
-    Move.ANSWER_AREA: "Describe the area using FACTS.area only; you may quote FACTS.area_travel_text verbatim (keep the word approx. if present), then offer to show options.",
+    Move.ANSWER_AREA: "If FACTS.ranking_text is present, quote it verbatim as the answer to which areas yield best and then ask FACTS.next_question. Otherwise describe the area using FACTS.area only; you may quote FACTS.area_travel_text verbatim (keep the word approx. if present), then offer to show options.",
     Move.ANSWER_PROPERTY: "Answer about the property using FACTS.property only, then offer a viewing.",
     Move.COMPARE: "Compare the properties in FACTS.compare on price, size and bedrooms; ask which they prefer.",
     Move.HANDLE_OBJECTION: "Acknowledge the objection in FACTS.objection, present the adjusted options in FACTS.cards (count only), ask if better.",
@@ -57,6 +57,8 @@ async def respond(
         template_key = "suggest_empty"
     elif move == Move.CONFIRM_HANDOFF and (not state.shortlist or state.asked.get("suggest_empty", 0) > 0):
         template_key = "confirm_handoff_no_inventory"
+    elif move == Move.ANSWER_AREA and "ranking" in facts:
+        template_key = "answer_area_ranking" if facts.get("ranking_text") else "answer_area_ranking_empty"
     template_reply = templates.render(move, state.language, facts, field=field, key=template_key)
 
     # Deterministic moves are always templated: no LLM value, and the wording is compliance-sensitive.

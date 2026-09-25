@@ -15,6 +15,12 @@ answer_area:
   - "{area_name} {area_summary} متوسط الأسعار حوالي {area_price_psf} درهم للقدم المربع. هل أعرض لك خيارات هناك؟"
   - "{area_name} {area_summary} تبعد {area_travel_text}. هل أعرض لك خيارات هناك؟"
   - "{area_name} خيار شائع. هل تريد أن أعرض لك بعض العقارات هناك لتعرف ما تحصل عليه بميزانيتك؟"
+answer_area_ranking:
+  - "بحسب عروضنا الحالية، أعلى عوائد الإيجار الإجمالية في {ranking_text}. ولتضييق الخيارات، {next_question}"
+  - "من المعروض الحالي، أفضل العوائد الآن في {ranking_text}. {next_question}"
+answer_area_ranking_empty:
+  - "العوائد تختلف كثيراً بين المناطق ومستويات الأسعار، وأفضّل أن أعرض لك أرقاماً حقيقية من العروض بدلاً من التخمين. {next_question}"
+  - "سؤال جيد — أذكر العوائد فقط من العروض الحالية، وأحتاج القليل من التفاصيل. {next_question}"
 answer_property:
   - "{property_title} في {property_area}: {property_type} بـ {property_bedrooms} غرف، {property_size} قدم مربع، بسعر {property_price} درهم. هل تريد معاينته؟"
   - "بكل سرور — أي عقار من التي عرضتها تريد معرفة المزيد عنه؟"
