@@ -1017,3 +1017,163 @@ export const adminApi = {
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// Co-work: integrations, scheduled jobs, task automations, run history, audit
+// ---------------------------------------------------------------------------
+
+export type IntegrationStatus = "connected" | "degraded" | "not_configured" | "paused" | "error";
+
+export interface IntegrationCard {
+  id: string;
+  kind: "connector" | "channel" | "ai" | "data" | "crm";
+  name: string;
+  status: IntegrationStatus;
+  detail: string;
+  provider: string | null;
+  last_activity: string | null;
+  connector?: Connector;
+}
+
+export interface JobRun {
+  id: string;
+  job_id: string;
+  trigger: "schedule" | "manual" | "automation";
+  actor: string | null;
+  status: "running" | "success" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  summary: Record<string, unknown>;
+  error: string | null;
+}
+
+export interface CoworkJob {
+  id: string;
+  label: string;
+  description: string;
+  category: "intake" | "engagement" | "sync" | "compliance" | "housekeeping";
+  enabled: boolean;
+  interval_s: number;
+  default_interval_s: number;
+  last_run: JobRun | null;
+  next_run_at: string | null;
+}
+
+export interface AutomationCondition {
+  field: string;
+  op: "eq" | "ne" | "gte" | "lte" | "in" | "contains" | "exists";
+  value: unknown;
+}
+
+export interface Automation {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger: string;
+  conditions: AutomationCondition[];
+  action: string;
+  action_params: Record<string, unknown>;
+  enabled: boolean;
+  run_count: number;
+  last_run_at: string | null;
+  last_status: "fired" | "failed" | null;
+  created_at: string;
+}
+
+export interface AutomationInput {
+  name: string;
+  description?: string | null;
+  trigger: string;
+  conditions: AutomationCondition[];
+  action: string;
+  action_params: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface AutomationCatalog {
+  triggers: Record<string, string>;
+  actions: Record<string, string>;
+  condition_fields: string[];
+  operators: AutomationCondition["op"][];
+  jobs: { id: string; label: string }[];
+}
+
+export interface AutomationRun {
+  id: string;
+  automation_id: string;
+  automation_name: string | null;
+  event_type: string | null;
+  lead_id: string | null;
+  status: "fired" | "failed";
+  result: Record<string, unknown>;
+  error: string | null;
+  created_at: string;
+}
+
+export interface CoworkTask {
+  id: string;
+  lead_id: string | null;
+  broker_id: string | null;
+  automation_id: string | null;
+  title: string;
+  due_in_hours: number;
+  status: "open" | "done" | "dismissed";
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string | null;
+  kind: "job" | "automation";
+  subject: string;
+  status: string | null;
+  trigger: string | null;
+  actor: string | null;
+  detail: Record<string, unknown> | string;
+}
+
+export interface CoworkOverview {
+  integrations: Record<IntegrationStatus, number>;
+  jobs: { total: number; enabled: number; failing: number };
+  runs: { window_hours: number; runs: number; failed: number; success_rate: number | null; avg_duration_ms: number | null; last_failure: JobRun | null };
+  automations: { total: number; enabled: number; fired_total: number };
+  tasks_open: number;
+  review_open: number;
+}
+
+export const coworkApi = {
+  overview: () => fetchApi<CoworkOverview>("/api/v1/cowork/overview"),
+  integrations: () => fetchApi<{ integrations: IntegrationCard[]; counts: Record<IntegrationStatus, number> }>("/api/v1/cowork/integrations"),
+  jobs: () => fetchApi<CoworkJob[]>("/api/v1/cowork/jobs"),
+  patchJob: (id: string, patch: { enabled?: boolean; interval_s?: number }) =>
+    fetchApi<CoworkJob>(`/api/v1/cowork/jobs/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  runJob: (id: string) => fetchApi<JobRun>(`/api/v1/cowork/jobs/${id}/run`, { method: "POST" }),
+  runs: (params: { job_id?: string; status?: JobRun["status"]; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.job_id) q.set("job_id", params.job_id);
+    if (params.status) q.set("status", params.status);
+    if (params.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return fetchApi<JobRun[]>(`/api/v1/cowork/runs${qs ? `?${qs}` : ""}`);
+  },
+  catalog: () => fetchApi<AutomationCatalog>("/api/v1/cowork/automations/catalog"),
+  automations: () => fetchApi<Automation[]>("/api/v1/cowork/automations"),
+  createAutomation: (input: AutomationInput) =>
+    fetchApi<Automation>("/api/v1/cowork/automations", { method: "POST", body: JSON.stringify(input) }),
+  patchAutomation: (id: string, patch: Partial<AutomationInput>) =>
+    fetchApi<Automation>(`/api/v1/cowork/automations/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteAutomation: (id: string) => fetchApi<{ deleted: boolean }>(`/api/v1/cowork/automations/${id}`, { method: "DELETE" }),
+  testAutomation: (id: string) =>
+    fetchApi<{ checked: number; matched: number; sample: { id: string; name: string; stage: string | null; score: number | null }[] }>(
+      `/api/v1/cowork/automations/${id}/test`,
+      { method: "POST" }
+    ),
+  runAutomations: () => fetchApi<JobRun>("/api/v1/cowork/automations/run", { method: "POST" }),
+  automationRuns: (automationId?: string) =>
+    fetchApi<AutomationRun[]>(`/api/v1/cowork/automations/runs${automationId ? `?automation_id=${automationId}` : ""}`),
+  tasks: (status?: CoworkTask["status"]) => fetchApi<CoworkTask[]>(`/api/v1/cowork/tasks${status ? `?status=${status}` : ""}`),
+  patchTask: (id: string, status: CoworkTask["status"]) =>
+    fetchApi<CoworkTask>(`/api/v1/cowork/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  audit: (limit = 100) => fetchApi<AuditEntry[]>(`/api/v1/cowork/audit?limit=${limit}`),
+};

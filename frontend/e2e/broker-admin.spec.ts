@@ -54,7 +54,7 @@ test.describe("broker workspace (demo mode)", () => {
 
 test.describe("admin (demo mode)", () => {
   test("Ops tab shows latency stats and alert state", async ({ page }) => {
-    await page.goto("/admin/ingestion");
+    await page.goto("/cowork?tab=data");
     await page.getByRole("tab", { name: "Ops" }).click();
     await expect(page.getByText(/Last \d+ minutes/)).toBeVisible();
     await expect(page.getByText("Last 1,000 turns")).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("admin (demo mode)", () => {
   });
 
   test("review queue and data health tabs load", async ({ page }) => {
-    await page.goto("/admin/ingestion");
+    await page.goto("/cowork?tab=data");
     for (const name of ["Review queue", "Data health"]) {
       const tab = page.getByRole("tab", { name });
       if (await tab.count()) {
@@ -71,5 +71,28 @@ test.describe("admin (demo mode)", () => {
         await expect(page.getByText(/Network error|Failed to|Error:/)).toHaveCount(0);
       }
     }
+  });
+});
+
+test.describe("co-work (demo mode)", () => {
+  test("overview, schedules run-now, and automation creation", async ({ page }) => {
+    await page.goto("/cowork");
+    await expect(page.getByRole("heading", { name: /Co-work/ })).toBeVisible();
+    await expect(page.getByText("Scheduled jobs")).toBeVisible();
+
+    await page.getByRole("tab", { name: "Schedules" }).click();
+    await page.getByRole("button", { name: "Run now" }).first().click();
+    await expect(page.getByRole("status")).toContainText(/Ran /);
+    await expect(page.getByText("Run history")).toBeVisible();
+
+    await page.getByRole("tab", { name: "Automations" }).click();
+    await page.getByRole("button", { name: "New automation" }).click();
+    await page.getByPlaceholder("Hot lead follow-up task").fill("E2E hot lead task");
+    await page.getByRole("button", { name: "Create automation" }).click();
+    await expect(page.getByRole("status")).toContainText("Automation created");
+    await expect(page.getByText("E2E hot lead task")).toBeVisible();
+
+    await page.getByRole("tab", { name: "Activity" }).click();
+    await expect(page.getByText("Audit trail")).toBeVisible();
   });
 });
