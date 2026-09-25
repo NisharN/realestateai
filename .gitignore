@@ -1,19 +1,33 @@
-# Node modules
+# Node
 node_modules/
-# Environment variables
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+frontend/probe-tmp.ts
+*.tsbuildinfo
+
+# Environment variables (examples are tracked explicitly)
 .env
-.env.example
+.env.*
+!.env.example
+!*/.env.example
+
 # Build outputs
 dist/
 build/
+
 # Logs
 *.log
+
 # OS generated files
 .DS_Store
 Thumbs.db
-# IDE
+
+# IDE / agent scratch
 .vscode/
 .idea/
+.superpowers/
+
 # Python
 __pycache__/
 *.pyc
@@ -22,15 +36,16 @@ __pycache__/
 .Python
 env/
 venv/
+venv_*/
 .venv/
+.pytest_cache/
 pip-log.txt
-pip-delete-this-directory.s
-# Docker
-.dockerignore
+backend/tmp_*/
+backend/runtime/
+backend/*.state.json
+backend/models/piper/
+
 # Misc
 *.tmp
 *.bak
 *.swp
-.env.exampleex
-backend/runtime/
-backend/*.state.json

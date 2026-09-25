@@ -2,18 +2,21 @@
 import logging
 from datetime import datetime
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.auth import RequestContext, get_request_context
 from app.database import (
+    get_activity_repository,
+    get_broker_repository,
     get_db,
     get_lead_repository,
-    get_broker_repository,
-    get_activity_repository,
 )
-from app.agents.orchestrator import agent_graph, AgentState
-from app.auth import RequestContext, get_request_context
-from app.models.lead import LeadCreate, LeadResponse, LeadUpdate
+from app.models.lead import LeadResponse
+from app.modules.agents import scorer
+from app.modules.conversation.engine import TurnResult, handle_turn
+from app.modules.conversation.repository import ConversationRepo
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -76,73 +79,51 @@ async def ingest_lead(
         lead = await lead_repo.create(lead_data)
         lead_id = lead["id"]
 
-        # Initialize agent state
-        initial_state: AgentState = {
-            "lead_id": lead_id,
-            "workspace_id": context.workspace_id,
-            "lead_data": lead_data,
-            "messages": [],
-            "language": request.preferred_language,
-            "intent_score": 0,
-            "qualification": {},
-            "matched_properties": [],
-            "conversation_complete": False,
-            "needs_human": False,
-            "handoff_reason": None,
-            "next_node": "scoring",
-            "created_at": "",
-            "error": None,
-        }
+        repo = ConversationRepo(context.workspace_id)
+        state = await repo.load(lead_id, channel="chat", source=request.source)
+        state.score, state.score_reasons = scorer.score(state)
+        state.band = scorer.band_for(state.score)
+        await repo.save(state)
 
-        # Add initial message if provided
+        reply = ""
         if request.message:
-            from langchain_core.messages import HumanMessage
-            initial_state["messages"] = [HumanMessage(content=request.message)]
+            result = await handle_turn(
+                lead_id,
+                request.message,
+                workspace_id=context.workspace_id,
+                channel="chat",
+                source=request.source,
+                idempotency_key=f"ingest:{lead_id}",
+            )
+            state.score, state.stage, state.handoff_id = result.score, result.stage, result.handoff_id  # type: ignore[assignment]
+            reply = result.reply
 
-        # Run agent graph
-        result = await agent_graph.ainvoke(initial_state)
-
-        # Update lead with results
         await lead_repo.update(lead_id, {
-            "intent_score": result.get("intent_score", 0),
-            "status": "qualified" if result.get("intent_score", 0) >= 60 else "nurture",
-            "conversation_history": [{
-                "role": "ai" if i % 2 else "user",
-                "content": msg.content if hasattr(msg, "content") else str(msg)
-            } for i, msg in enumerate(result.get("messages", []))]
+            "intent_score": state.score,
+            "status": "qualified" if state.score >= 60 else "nurture",
         })
 
-        # Log activity
         activity_repo = get_activity_repository(context.workspace_id)
         await activity_repo.create({
             "lead_id": lead_id,
             "activity_type": "ai_qualification",
-            "description": f"AI scored lead {result.get('intent_score', 0)}/100",
+            "description": f"AI scored lead {state.score}/100",
             "performed_by": "ai_agent",
-            "outcome": "qualified" if result.get("intent_score", 0) >= 60 else "nurture"
+            "outcome": "qualified" if state.score >= 60 else "nurture",
         })
 
-        # Determine next action
         next_action = "conversation"
-        if result.get("needs_human"):
+        if state.handoff_id:
             next_action = "broker_handoff"
-            # Try to assign broker
-            broker_repo = get_broker_repository(context.workspace_id)
-            broker = await broker_repo.get_available_broker(
-                specialization=lead_data.get("area_preference")
-            )
-            if broker:
-                await lead_repo.assign_broker(lead_id, broker["id"])
-                await broker_repo.increment_lead_count(broker["id"])
-        elif result.get("intent_score", 0) < 30:
+        elif state.score < 30:
             next_action = "nurture_sequence"
 
         return LeadIngestResponse(
             lead_id=lead_id,
             status="success",
-            intent_score=result.get("intent_score", 0),
+            intent_score=state.score,
             next_action=next_action,
-            message="Lead processed successfully"
+            message=reply or "Lead processed successfully"
         )
 
     except Exception as e:
@@ -182,80 +163,106 @@ async def get_lead(lead_id: str, context: RequestContext = Depends(get_request_c
     return lead
 
 
-@router.post("/{lead_id}/message")
+class MessageRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    idempotency_key: Optional[str] = Field(None, max_length=128)
+    channel: str = "chat"
+
+
+class MessageResponse(BaseModel):
+    lead_id: str
+    response: str
+    move: str
+    stage: str
+    score: int
+    band: str
+    score_reasons: List[str]
+    needs_human: bool
+    handoff_id: Optional[str] = None
+    matched_properties: List[dict]
+    area: Optional[dict] = None
+    compare: List[dict] = Field(default_factory=list)
+    profile: dict
+    ended: bool
+    fallbacks: List[str]
+    latency_ms: int
+
+
+def _message_response(lead_id: str, r: TurnResult) -> MessageResponse:
+    return MessageResponse(
+        lead_id=lead_id,
+        response=r.reply,
+        move=r.move,
+        stage=r.stage,
+        score=r.score,
+        band=r.band,
+        score_reasons=r.score_reasons,
+        needs_human=r.handoff_id is not None,
+        handoff_id=r.handoff_id,
+        matched_properties=r.cards,
+        area=r.area,
+        compare=r.compare,
+        profile=r.profile,
+        ended=r.ended,
+        fallbacks=r.fallbacks,
+        latency_ms=r.latency_ms,
+    )
+
+
+@router.post("/{lead_id}/message", response_model=MessageResponse)
 async def send_message(
     lead_id: str,
-    message: dict,
+    message: MessageRequest,
     context: RequestContext = Depends(get_request_context),
-    db=Depends(get_db),
 ):
-    """Send a message to a lead (continues conversation)."""
-    try:
-        lead_repo = get_lead_repository(context.workspace_id)
-        lead = await lead_repo.get_by_id(lead_id)
-        if not lead:
-            raise HTTPException(status_code=404, detail="Lead not found")
-        if not context.can_access_lead(lead):
-            raise HTTPException(status_code=404, detail="Lead not found")
+    """Buyer turn: runs the shared conversation engine (chat channel)."""
+    lead_repo = get_lead_repository(context.workspace_id)
+    lead = await lead_repo.get_by_id(lead_id)
+    if not lead or not context.can_access_lead(lead):
+        raise HTTPException(status_code=404, detail="Lead not found")
 
-        from langchain_core.messages import HumanMessage, AIMessage
+    result = await handle_turn(
+        lead_id,
+        message.text,
+        workspace_id=context.workspace_id,
+        channel=message.channel if message.channel in {"chat", "widget", "whatsapp", "voice"} else "chat",
+        idempotency_key=message.idempotency_key,
+        source=lead.get("source"),
+    )
+    await lead_repo.update(lead_id, {"last_contact_at": datetime.utcnow().isoformat()})
+    return _message_response(lead_id, result)
 
-        # Build state from lead history
-        state: AgentState = {
-            "lead_id": lead_id,
-            "workspace_id": context.workspace_id,
-            "lead_data": lead,
-            "messages": [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"])
-                        for msg in lead.get("conversation_history", [])],
-            "language": lead.get("preferred_language", "en"),
-            "intent_score": lead.get("intent_score", 0),
-            "qualification": lead,
-            "matched_properties": [],
-            "conversation_complete": False,
-            "needs_human": False,
-            "handoff_reason": None,
-            "next_node": "conversation",
-            "created_at": "",
-            "error": None,
-        }
 
-        # Add new message
-        state["messages"].append(HumanMessage(content=message.get("text", "")))
-
-        # Run conversation agent
-        result = await agent_graph.ainvoke(state)
-
-        # Update lead
-        await lead_repo.update(lead_id, {
-            "conversation_history": [{
-                "role": "ai" if i % 2 else "user",
-                "content": msg.content if hasattr(msg, "content") else str(msg)
-            } for i, msg in enumerate(result.get("messages", []))],
-            "last_contact_at": datetime.utcnow().isoformat()
-        })
-
-        # Check for handoff
-        if result.get("needs_human"):
-            broker_repo = get_broker_repository(context.workspace_id)
-            if not lead.get("assigned_broker"):
-                broker = await broker_repo.get_available_broker()
-                if broker:
-                    await lead_repo.assign_broker(lead_id, broker["id"])
-
-        # Get last AI message
-        ai_messages = [m for m in result.get("messages", []) if isinstance(m, AIMessage)]
-        last_response = ai_messages[-1].content if ai_messages else "I\'ll get back to you shortly."
-
-        return {
-            "lead_id": lead_id,
-            "response": last_response,
-            "needs_human": result.get("needs_human", False),
-            "matched_properties": result.get("matched_properties", [])[:3]
-        }
-
-    except Exception as e:
-        logger.error(f"Message error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/{lead_id}/conversation")
+async def get_conversation(
+    lead_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    context: RequestContext = Depends(get_request_context),
+):
+    """Normalized message history plus current conversation state."""
+    lead_repo = get_lead_repository(context.workspace_id)
+    lead = await lead_repo.get_by_id(lead_id)
+    if not lead or not context.can_access_lead(lead):
+        raise HTTPException(status_code=404, detail="Lead not found")
+    repo = ConversationRepo(context.workspace_id)
+    state = await repo.load(lead_id)
+    messages = await repo.history(lead_id, limit=limit)
+    return {
+        "lead_id": lead_id,
+        "state": {
+            "stage": state.stage,
+            "language": state.language,
+            "turn": state.turn,
+            "score": state.score,
+            "band": state.band,
+            "score_reasons": state.score_reasons,
+            "profile": state.profile_values(),
+            "shortlist": [s.model_dump(mode="json") for s in state.shortlist],
+            "objections": state.objections,
+            "handoff_id": state.handoff_id,
+        },
+        "messages": messages,
+    }
 
 
 @router.post("/{lead_id}/assign")

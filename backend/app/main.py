@@ -1,5 +1,4 @@
 """FastAPI main application entry point."""
-import os
 import logging
 from contextlib import asynccontextmanager
 
@@ -76,7 +75,7 @@ async def root():
         "status": "online",
         "service": "Dubai Real Estate AI",
         "version": "1.0.0",
-        "agents": ["scoring", "qualifier", "research", "conversational", "followup", "handoff"]
+        "engine": ["extractor", "policy", "scorer", "responder", "guard", "handoff"]
     }
 
 

@@ -1,7 +1,6 @@
 """Application configuration and settings."""
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from typing import List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -59,6 +58,31 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"  # 1K RPD - use for quality
     GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"  # 14.4K RPD - use for volume
+
+    # --- LLM gateway (architecture §10) ---
+    # Ordered provider chain. Every call has a deadline; when the whole chain
+    # fails the caller falls back to rules / templates, never to an error.
+    LLM_PROVIDERS: str = "groq,secondary,ollama"
+    LLM_SECONDARY_API_KEY: str = ""
+    LLM_SECONDARY_BASE_URL: str = ""          # any OpenAI-compatible endpoint
+    LLM_SECONDARY_MODEL_FAST: str = ""
+    LLM_SECONDARY_MODEL_QUALITY: str = ""
+    LLM_OLLAMA_BASE_URL: str = ""             # e.g. http://localhost:11434
+    LLM_OLLAMA_MODEL: str = "qwen2.5:3b"
+    LLM_EXTRACT_TIMEOUT_S: float = 1.5
+    LLM_RESPOND_TIMEOUT_S: float = 2.5
+    LLM_BREAKER_FAILURES: int = 3
+    LLM_BREAKER_WINDOW_S: int = 60
+    LLM_BREAKER_COOLDOWN_S: int = 120
+
+    # --- Conversation engine ---
+    TURN_DEADLINE_CHAT_S: float = 6.0
+    TURN_DEADLINE_VOICE_S: float = 4.0
+    STT_TIMEOUT_S: float = 2.5
+    TTS_TIMEOUT_S: float = 2.0
+    VOICE_HEARTBEAT_S: float = 10.0
+    HANDOFF_REASSIGN_MINUTES: int = 15
+    WEBHOOK_SIGNING_SECRET: str = ""          # generic push connector HMAC key
     HUGGING_FACE_API_KEY: str = ""
     HUGGING_FACE_STT_MODEL: str = "openai/whisper-large-v3-turbo"
 
@@ -73,37 +97,16 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
 
-    # Scraping
-    PROXY_LIST: Optional[str] = None
-    SCRAPER_HEADLESS: bool = True
-    SCRAPER_BROWSER_CHANNEL: Optional[str] = None
-    SCRAPER_STORAGE_STATE_PATH: Optional[str] = None
-    SCRAPER_USER_DATA_DIR: Optional[str] = None
-    SCRAPER_PROFILE_NAME: Optional[str] = None
-    SCRAPER_STATE_DIR: str = "./runtime/scraper-state"
+    # Licensed property sources (no portal scraping — BRD §1.4)
     APPROVED_FEED_URL: Optional[str] = None
     APPROVED_FEED_TOKEN: Optional[str] = None
     RAPIDAPI_UAE_REAL_ESTATE_KEY: Optional[str] = None
     RAPIDAPI_UAE_REAL_ESTATE_HOST: str = "uae-real-estate3.p.rapidapi.com"
 
-    # Bayut and Dubizzle are actively anti-bot-protected on their public
-    # browse paths (see docs/scraper_operations.md, verified July 2026) and
-    # require proxies or manually-solved browser sessions to work at all.
-    # Deferred per the product/market review: default OFF. The endpoints
-    # still exist for whoever wants to opt back in with real proxy/session
-    # infrastructure — they just aren't the default recommended path
-    # anymore. Property Finder, CSV/CRM import, approved feeds, and
-    # RapidAPI remain fully enabled.
-    ENABLE_BAYUT_DUBIZZLE_SCRAPING: bool = False
-
     # Voice (Piper TTS)
     PIPER_MODEL_PATH: str = "./models/piper"
     PIPER_VOICE_EN: str = "en_US-lessac-medium"
     PIPER_VOICE_AR: str = "ar_JO-kareem-medium"
-
-    # LangGraph
-    LANGCHAIN_TRACING_V2: bool = False
-    LANGCHAIN_API_KEY: Optional[str] = None
 
     # Jobs and billing
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -141,41 +144,8 @@ class Settings(BaseSettings):
         return self.SUPABASE_SERVICE_KEY or self.SUPABASE_KEY
 
     @property
-    def proxies(self) -> List[str]:
-        if not self.PROXY_LIST:
-            return []
-        items = [p.strip() for p in self.PROXY_LIST.split(",") if p.strip()]
-        # Reject obviously placeholder entries so dev scrapers don't break
-        return [
-            p
-            for p in items
-            if not p.lower().startswith(("http://proxy", "https://proxy"))
-            and "example" not in p.lower()
-        ]
-
-    @property
-    def playwright_proxies(self) -> List[Dict[str, Any]]:
-        """Parse proxies into Playwright-ready dictionaries.
-
-        Supports:
-        - `http://host:port`
-        - `http://user:pass@host:port`
-        - `socks5://user:pass@host:port`
-        """
-        parsed: List[Dict[str, Any]] = []
-        for raw in self.proxies:
-            parsed_url = urlparse(raw)
-            if not parsed_url.scheme or not parsed_url.hostname or not parsed_url.port:
-                continue
-            proxy: Dict[str, Any] = {
-                "server": f"{parsed_url.scheme}://{parsed_url.hostname}:{parsed_url.port}"
-            }
-            if parsed_url.username:
-                proxy["username"] = parsed_url.username
-            if parsed_url.password:
-                proxy["password"] = parsed_url.password
-            parsed.append(proxy)
-        return parsed
+    def llm_providers(self) -> List[str]:
+        return [p.strip().lower() for p in self.LLM_PROVIDERS.split(",") if p.strip()]
 
     @property
     def cors_origins(self) -> List[str]:

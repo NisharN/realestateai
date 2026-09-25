@@ -1,6 +1,6 @@
 """API routes for conversation management."""
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.database import get_db, get_conversation_repository
 from app.auth import RequestContext, get_request_context

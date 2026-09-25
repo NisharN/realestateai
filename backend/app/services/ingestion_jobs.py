@@ -8,15 +8,15 @@ def retry_delay_seconds(attempt: int) -> int:
 
 
 def failure_transition(
-    failure_count: int,
+    consecutive_failures: int,
     error_code: str,
     now: datetime,
     disable_after: int = 5,
 ) -> dict[str, Any]:
-    failures = failure_count + 1
+    failures = consecutive_failures + 1
     disabled = failures >= disable_after
     return {
-        "failure_count": failures,
+        "consecutive_failures": failures,
         "enabled": not disabled,
         "last_error_code": error_code,
         "next_run_at": None if disabled else (

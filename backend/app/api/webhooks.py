@@ -1,12 +1,19 @@
 """Public webhook boundaries.
 
-Inbound mutation fails closed until Phase 4 can resolve a verified provider
-event or widget key to exactly one workspace.
+WhatsApp events are signature-verified, persisted raw, then routed through
+the shared turn engine. Website-form intake fails closed until widget keys
+resolve to a workspace.
 """
+import json
+import logging
+
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import get_settings
+from app.modules.channels.whatsapp_inbound import handle_payload
 from app.webhook_security import verify_meta_signature
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,13 +31,18 @@ async def whatsapp_webhook(
             status_code=401,
             detail={"code": "invalid_signature", "message": "Invalid webhook signature"},
         )
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "code": "channel_not_configured",
-            "message": "WhatsApp channel is not configured",
-        },
-    )
+    try:
+        payload = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail={"code": "invalid_json"})
+    result = await handle_payload(payload if isinstance(payload, dict) else {})
+    return {
+        "status": "ok",
+        "stored": result.stored,
+        "replied": result.replied,
+        "skipped": result.skipped,
+        "errors": len(result.errors),
+    }
 
 
 @router.get("/whatsapp")

@@ -1,0 +1,57 @@
+# Fallback replies per move. Every move has at least one entry.
+# Placeholders are filled from FACTS only (profile + tool results).
+greeting:
+  - "Hi{name_suffix}, I'm the property assistant for {brokerage}. Are you looking to buy, rent, or invest in Dubai?"
+opt_out:
+  - "Understood — I won't message you again. If you change your mind, just say hello. Take care."
+handoff_now:
+  - "Of course. I'm passing you to {broker_name}, one of our specialists, who will contact you shortly on this number."
+  - "Sure — a specialist from our team will reach out to you shortly. Thank you for your patience."
+clarify_budget:
+  - "{budget_question}"
+  - "Just to confirm your budget — is that in AED, and is it the total purchase price or per year for rent?"
+clarify_area:
+  - "I want to make sure I look in the right place — which community did you mean? For example Dubai Marina, Downtown, JVC or Dubai Hills."
+answer_area:
+  - "{area_name} is {area_summary} Typical prices are around AED {area_price_psf} per sq ft. Shall I show you options there?"
+  - "{area_name} is a popular choice. Would you like me to pull some listings there so you can see what your budget gets you?"
+answer_property:
+  - "{property_title} in {property_area}: {property_bedrooms} bedroom {property_type}, {property_size} sq ft, listed at AED {property_price}. Would you like to see it?"
+  - "Happy to help — which of the properties I showed would you like to know more about?"
+compare:
+  - "Here is a side-by-side of {compare_titles}. The main differences are price and size — see the table. Which one feels closer to what you want?"
+  - "I can compare two or three of the options I showed you. Which ones would you like side by side?"
+handle_objection:
+  - "That makes sense. I've adjusted the search — here are {result_count} options that better fit {objection_topic}. Do any of these work better?"
+  - "Understood. Tell me what matters most — price, location or size — and I'll refine the shortlist."
+ask_next_field:
+  purpose: "Are you looking to buy, rent, or invest?"
+  budget: "What budget do you have in mind? For example AED 1.5M to buy, or AED 120k per year to rent."
+  area: "Which areas of Dubai are you considering? For example Dubai Marina, Downtown, JVC or Dubai Hills."
+  property_type: "Would you prefer an apartment, villa, or townhouse?"
+  bedrooms: "How many bedrooms do you need?"
+  timeline: "When are you hoping to move or complete — within 3 months, 3–6 months, or later?"
+  payment: "Will this be a cash purchase or with a mortgage? If mortgage, is it pre-approved?"
+suggest:
+  - "Based on what you've told me, here are {result_count} options in {area_name} within your budget. Do any of these catch your eye?"
+  - "Here are {result_count} listings that match your brief. Tell me which you like or what to change."
+suggest_empty:
+  - "I don't have a live listing that matches all of that right now. Would you consider a nearby community or a slightly higher budget? Otherwise a specialist can check off-market options for you."
+confirm_handoff:
+  - "Great choice. Shall I have a specialist call you to arrange a viewing? {slot_suggestion}"
+handoff:
+  - "Perfect — {broker_name} will call you {slot_text}. You'll receive a WhatsApp confirmation shortly. Thank you!"
+  - "Perfect — a specialist will be in touch shortly to arrange the viewing. Thank you!"
+nurture:
+  - "No problem at all. I'll check in closer to your timeline with new options that fit your brief. Feel free to message me anytime."
+small_talk_redirect:
+  - "Happy to help with that. To find the right property for you, could you tell me {next_question_lower}"
+  - "Sure. Let's get you the right options — {next_question_lower}"
+ask_reaction:
+  - "Noted, thank you. Do any of the options I showed you look interesting, or should I adjust the search?"
+after_handoff:
+  - "Thanks — {broker_name} has your details and will be in touch shortly. If anything changes, just let me know."
+stt_failed:
+  - "Sorry, I couldn't hear that clearly. Could you say it again, or type your message?"
+error_fallback:
+  - "Sorry, I didn't quite catch that. Could you say it another way?"

@@ -1,18 +1,40 @@
-"""Voice conversation API routes."""
-import logging
+"""Voice conversation API routes.
+
+The WebSocket shares the turn engine with chat/WhatsApp. Per-turn failures
+(STT, engine, TTS) send a fallback reply and keep the socket open; the client
+always receives ``reply`` text and may receive ``audio`` (real WAV) — when
+``audio`` is absent the client should use browser speech synthesis.
+"""
+from __future__ import annotations
+
+import asyncio
 import base64
 import io
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from fastapi.responses import StreamingResponse
+import logging
+import uuid
 
-from app.config import get_settings
-from app.database import get_db, get_lead_repository
-from app.services.voice_service import VoiceService
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
+
 from app.auth import AuthBackend, RequestContext, get_auth_backend, get_request_context
-from app.api.leads import send_message
+from app.database import get_lead_repository
+from app.modules.conversation import templates
+from app.modules.conversation.engine import handle_turn
+from app.services.voice_service import VoiceService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+HEARTBEAT_S = 20.0
+
+
+async def _send(ws: WebSocket, payload: dict) -> bool:
+    try:
+        await ws.send_json(payload)
+        return True
+    except Exception as exc:  # socket gone
+        logger.info("voice send failed: %s", exc)
+        return False
 
 
 @router.websocket("/conversation/{lead_id}")
@@ -20,103 +42,125 @@ async def voice_conversation(
     websocket: WebSocket,
     lead_id: str,
     token: str,
-    workspace_id: str,
+    workspace_id: str = "",
     backend: AuthBackend = Depends(get_auth_backend),
-    db=Depends(get_db),
 ):
-    """WebSocket endpoint for real-time voice conversation."""
-    context = await backend.authenticate(token, workspace_id)
-    await websocket.accept()
-    voice_service = VoiceService()
-
     try:
-        # Get lead context
-        lead_repo = get_lead_repository(context.workspace_id)
-        lead = await lead_repo.get_by_id(lead_id)
-        if not lead or not context.can_access_lead(lead):
-            await websocket.close(code=4404)
-            return
+        context = await backend.authenticate(token)
+    except Exception as exc:
+        logger.info("voice auth failed: %s", exc)
+        await websocket.close(code=4401)
+        return
+    if workspace_id and workspace_id != context.workspace_id:
+        await websocket.close(code=4403)
+        return
 
-        # Send welcome message
-        welcome = "Hello! I'm Ali, your Dubai property assistant. How can I help you today?"
-        if lead and lead.get("preferred_language") == "ar":
-            welcome = "مرحباً! أنا علي، مساعدك العقاري في دبي. كيف يمكنني مساعدتك اليوم؟"
+    await websocket.accept()
+    voice = VoiceService()
 
-        await websocket.send_json({
-            "type": "text",
-            "content": welcome
-        })
+    lead_repo = get_lead_repository(context.workspace_id)
+    lead = await lead_repo.get_by_id(lead_id)
+    if not lead or not context.can_access_lead(lead):
+        await websocket.close(code=4404)
+        return
+    language = lead.get("preferred_language", "en") or "en"
 
+    await _send(
+        websocket,
+        {
+            "type": "ready",
+            "session_id": uuid.uuid4().hex,
+            "tts": voice.tts_available(language),
+            "heartbeat_s": HEARTBEAT_S,
+            "reply": templates.render("greeting", language, {"brokerage": "our brokerage"}),
+        },
+    )
+
+    async def heartbeat() -> None:
         while True:
-            # Receive audio data (base64 encoded)
+            await asyncio.sleep(HEARTBEAT_S)
+            if not await _send(websocket, {"type": "ping"}):
+                return
+
+    hb = asyncio.create_task(heartbeat())
+    try:
+        while True:
             message = await websocket.receive_json()
+            kind = message.get("type")
+            if kind in {"ping", "pong"}:
+                if kind == "ping":
+                    await _send(websocket, {"type": "pong"})
+                continue
 
-            if message.get("type") == "audio":
-                audio_data = base64.b64decode(message["data"])
-                language = lead.get("preferred_language", "en") if lead else "en"
-
-                # 1) Speech-to-text (Whisper via Groq, or a labeled
-                #    placeholder if GROQ_API_KEY isn't configured).
-                user_text = await voice_service.speech_to_text(audio_data, language)
-
-                if not user_text or user_text.startswith("["):
-                    ai_text = (
-                        "I didn't catch that — please try again, or type your message."
-                        if language != "ar"
-                        else "لم أفهم ذلك — حاول مرة أخرى أو اكتب رسالتك."
-                    )
-                    matched_properties = []
+            turn_id = message.get("turn_id") or uuid.uuid4().hex
+            user_text = ""
+            stt_error: str | None = None
+            try:
+                if kind == "audio":
+                    audio = base64.b64decode(message.get("data") or "")
+                    transcript = await voice.transcribe(audio, language)
+                    if transcript.ok:
+                        user_text = transcript.text
+                    else:
+                        stt_error = transcript.error or "stt_failed"
+                elif kind == "text":
+                    user_text = (message.get("text") or "").strip()
                 else:
-                    # 2) Route the transcribed text through the SAME agent
-                    #    pipeline text chat uses — this is the fix: voice
-                    #    used to return a canned echo here instead of a
-                    #    real AI response.
-                    result = await send_message(lead_id, {"text": user_text}, context=context, db=db)
-                    ai_text = result["response"]
-                    matched_properties = result.get("matched_properties", [])
+                    await _send(websocket, {"type": "error", "turn_id": turn_id, "code": "unknown_message_type", "recoverable": True})
+                    continue
 
-                # 3) Text-to-speech on the REAL response (Piper if
-                #    installed, else gTTS, else silence).
-                audio_response = await voice_service.text_to_speech(ai_text, language)
+                if not user_text:
+                    reply = templates.render("stt_failed", language, {})
+                    await _send(websocket, {"type": "reply", "turn_id": turn_id, "reply": reply, "user_text": "", "stt_error": stt_error, "fallbacks": ["stt"]})
+                    continue
 
-                await websocket.send_json({
-                    "type": "audio",
-                    "text": ai_text,
-                    "user_text": user_text,
-                    "audio": base64.b64encode(audio_response).decode("utf-8"),
-                    "properties": matched_properties,
-                })
-
-            elif message.get("type") == "text":
-                # Text-only mode fallback (same agent pipeline as above).
-                result = await send_message(
+                result = await handle_turn(
                     lead_id,
-                    {"text": message["text"]},
-                    context=context,
-                    db=db,
+                    user_text,
+                    workspace_id=context.workspace_id,
+                    channel="voice",
+                    idempotency_key=f"voice:{turn_id}",
                 )
-
-                await websocket.send_json({
-                    "type": "text",
-                    "content": result["response"],
-                    "properties": result.get("matched_properties", [])
-                })
-
+                language = result.language or language
+                payload = {
+                    "type": "reply",
+                    "turn_id": turn_id,
+                    "user_text": user_text,
+                    "reply": result.reply,
+                    "move": result.move,
+                    "stage": result.stage,
+                    "score": result.score,
+                    "properties": result.cards,
+                    "area": result.area,
+                    "handoff_id": result.handoff_id,
+                    "ended": result.ended,
+                    "fallbacks": result.fallbacks,
+                }
+                if kind == "audio" or message.get("want_audio"):
+                    wav = await voice.text_to_speech(result.reply, language)
+                    if wav:
+                        payload["audio"] = base64.b64encode(wav).decode("ascii")
+                        payload["audio_format"] = "audio/wav"
+                if not await _send(websocket, payload):
+                    break
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc:
+                logger.exception("voice turn failed for lead %s: %s", lead_id, exc)
+                reply = templates.render("error_fallback", language, {})
+                if not await _send(websocket, {"type": "reply", "turn_id": turn_id, "user_text": user_text, "reply": reply, "fallbacks": ["template:exception"]}):
+                    break
     except WebSocketDisconnect:
-        logger.info(f"Voice conversation ended for lead {lead_id}")
-    except Exception as e:
-        logger.error(f"Voice websocket error: {e}")
-        await websocket.close()
+        logger.info("voice conversation ended for lead %s", lead_id)
+    except Exception as exc:
+        logger.error("voice websocket error: %s", exc)
+    finally:
+        hb.cancel()
 
 
 @router.post("/synthesize")
 async def synthesize_speech(text: str, language: str = "en", context: RequestContext = Depends(get_request_context)):
-    """Text-to-speech endpoint."""
-    voice_service = VoiceService()
-    audio = await voice_service.text_to_speech(text, language)
-
-    return StreamingResponse(
-        io.BytesIO(audio),
-        media_type="audio/wav",
-        headers={"Content-Disposition": "attachment; filename=speech.wav"}
-    )
+    audio = await VoiceService().text_to_speech(text, language)
+    if audio is None:
+        return Response(status_code=204, headers={"X-TTS-Fallback": "browser"})
+    return Response(content=io.BytesIO(audio).getvalue(), media_type="audio/wav")
