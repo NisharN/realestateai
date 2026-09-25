@@ -49,6 +49,18 @@ celery_app.conf.update(
             "task": "app.worker.run_workflow_templates",
             "schedule": 300.0,  # every 5 minutes
         },
+        "reassign-stale-handoffs": {
+            "task": "app.worker.reassign_stale_handoffs",
+            "schedule": 60.0,
+        },
+        "send-due-followups": {
+            "task": "app.worker.send_due_followups",
+            "schedule": 300.0,
+        },
+        "retry-ingestion-errors": {
+            "task": "app.worker.retry_ingestion_errors",
+            "schedule": 120.0,
+        },
     },
 )
 
@@ -340,3 +352,35 @@ async def _generate_and_store_copy(
         client.table("listing_refresh_suggestions").insert(payload).execute()
     except Exception as exc:
         logger.debug("Could not store refresh suggestion: %s", exc)
+
+
+# --------------------------------------------------------------------------
+# Handoff / follow-up / ingestion timers (single-tenant: WORKSPACE_ID)
+# --------------------------------------------------------------------------
+
+@celery_app.task(name="app.worker.reassign_stale_handoffs")
+def reassign_stale_handoffs() -> int:
+    from app.modules.handoff.service import reassign_stale
+
+    return len(_run_async(reassign_stale(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.send_due_followups")
+def send_due_followups() -> int:
+    from app.modules.handoff.followups import send_due
+
+    return len(_run_async(send_due(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.retry_ingestion_errors")
+def retry_ingestion_errors() -> int:
+    from app.modules.ingestion.pipeline.processor import retry_errors
+
+    return len(_run_async(retry_errors(settings.WORKSPACE_ID)))
+
+
+@celery_app.task(name="app.worker.process_raw_records")
+def process_raw_records(workspace_id: str, raw_ids: list[str]) -> int:
+    from app.modules.ingestion.pipeline.processor import process_many
+
+    return len(_run_async(process_many(raw_ids, workspace_id=workspace_id)))

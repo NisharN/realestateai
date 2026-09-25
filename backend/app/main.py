@@ -8,10 +8,13 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.api import (
+    admin,
     auth,
     billing,
+    broker,
     conversations,
     dashboard,
+    ingest,
     ingestion,
     leads,
     market,
@@ -119,6 +122,9 @@ app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"]
 app.include_router(voice.router, prefix="/api/v1/voice", tags=["Voice"])
 app.include_router(workspace.router, prefix="/api/v1/workspace", tags=["Workspace"])
 app.include_router(ingestion.router, prefix="/api/v1/ingestion", tags=["Ingestion"])
+app.include_router(ingest.router, prefix="/api/v1/ingest", tags=["Ingest"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(broker.router, prefix="/api/v1/broker", tags=["Broker"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
 app.include_router(market.router, prefix="/api/v1/market", tags=["Market"])
 app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])

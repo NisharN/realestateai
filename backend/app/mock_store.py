@@ -182,6 +182,18 @@ class MockLeadRepository:
                 return deepcopy(lead)
         return None
 
+    async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        wanted = email.strip().lower()
+        for lead in _leads.values():
+            if lead.get("workspace_id") == self.workspace_id and (lead.get("email") or "").lower() == wanted:
+                return deepcopy(lead)
+        return None
+
+    async def list_all(self, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        items = [l for l in _leads.values() if l.get("workspace_id") == self.workspace_id]
+        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return [deepcopy(l) for l in items[offset : offset + limit]]
+
     async def update(self, lead_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if lead_id not in _leads or _leads[lead_id].get("workspace_id") != self.workspace_id:
             raise ValueError(f"Lead {lead_id} not found")
