@@ -61,7 +61,7 @@ STEP_TYPES: dict[str, dict[str, Any]] = {
     "connector.send_email": {"label": "E-mail summary", "group": "connector", "needs_connection": True, "capability": "send_email", "params": ["to", "subject"]},
     "connector.create_event": {"label": "Create calendar events for viewings", "group": "connector", "needs_connection": True, "capability": "create_event", "params": []},
     "connector.notify": {"label": "Notify team (Slack / WhatsApp)", "group": "connector", "needs_connection": True, "capability": "notify", "params": ["text", "to"]},
-    "leads.select": {"label": "Select leads", "group": "data", "needs_connection": False, "params": ["stage", "band", "min_score", "stale_hours", "created_within_hours", "limit"]},
+    "leads.select": {"label": "Select leads", "group": "data", "needs_connection": False, "params": ["stage", "band", "source", "min_score", "stale_hours", "created_within_hours", "lead_ids", "limit"]},
     "viewings.select": {"label": "Select upcoming viewings", "group": "data", "needs_connection": False, "params": ["within_hours", "limit"]},
     "listings.validate": {"label": "Validate listings (permit, price, photos)", "group": "data", "needs_connection": False, "params": ["limit"]},
     "llm.qualify": {"label": "Qualify & score selected leads (Jev)", "group": "llm", "needs_connection": False, "capability": "score_leads", "params": []},
@@ -306,8 +306,11 @@ async def _select_leads(ctx: RunContext, params: dict[str, Any]) -> dict[str, An
     repo = get_lead_repository(ctx.workspace_id)
     limit = min(int(params.get("limit") or 50), MAX_LEADS)
     rows: list[Row] = await repo.list_all(limit=2000)
+    wanted_ids = {str(x) for x in (params.get("lead_ids") or []) if x}
     out: list[Row] = []
     for lead in rows:
+        if wanted_ids and str(lead.get("id")) not in wanted_ids:
+            continue
         if params.get("stage") and lead_stage(lead) != params["stage"]:
             continue
         if params.get("band") and (lead.get("band") or "").lower() != str(params["band"]).lower():
@@ -727,7 +730,7 @@ async def _reject_leads(ctx: RunContext, params: dict[str, Any]) -> dict[str, An
 
     repo = get_lead_repository(ctx.workspace_id)
     max_score = int(params.get("max_score") or 30)
-    stale_hours = float(params.get("stale_hours") or 24 * 14)
+    stale_hours = float(params["stale_hours"]) if params.get("stale_hours") is not None else 24.0 * 14
     reason = str(params.get("reason") or "auto_reject_unresponsive")[:80]
     closed = protected = skipped = 0
     for lead in ctx.leads[:MAX_LEADS]:

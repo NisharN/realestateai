@@ -22,9 +22,9 @@ export interface NavigationItem {
  * brokerage. Agents get the day-to-day working set; owners and admins
  * additionally get configuration, team management, and docs.
  *
- * Market comps and automations are in the common set deliberately — an agent
- * arguing price with a landlord needs comps, and needs to see what the
- * automation already sent their lead before they pick up the phone.
+ * Operations (connections, CRM, routines, insights) is in the common set: the
+ * product is built for individual agents who connect their own portals,
+ * WhatsApp and CRM. Event rules and the job scheduler live under its Advanced menu.
  */
 const common: NavigationItem[] = [
   { href: "/", label: "Chat", icon: "chat" },
@@ -33,14 +33,13 @@ const common: NavigationItem[] = [
   { href: "/broker/pipeline", label: "Pipeline", icon: "pipeline" },
   { href: "/properties", label: "Properties", icon: "properties" },
   { href: "/market", label: "Market", icon: "market" },
-  { href: "/automations", label: "Automations", icon: "automations" },
+  { href: "/cowork", label: "Operations", icon: "cowork" },
 ];
 
 export function navigationForRole(role: WorkspaceRole): NavigationItem[] {
   if (role === "agent") return common;
   return [
     ...common,
-    { href: "/cowork", label: "Co-work", icon: "cowork" },
     { href: "/configure", label: "Configure", icon: "configure" },
     { href: "/members", label: "Members", icon: "members" },
     { href: "/docs", label: "Docs", icon: "docs" },

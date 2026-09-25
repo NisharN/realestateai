@@ -46,7 +46,7 @@ function isActive(pathname: string, item: NavigationItem) {
 function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; pathname: string; onNavigate?: () => void }) {
   const groups = [
     { label: "Workspace", keys: ["/dashboard", "/broker", "/broker/pipeline", "/properties", "/market"] },
-    { label: "Operations", keys: ["/cowork", "/automations"] },
+    { label: "Operations", keys: ["/cowork"] },
     { label: "Settings", keys: ["/configure", "/members", "/docs"] },
   ];
   return (

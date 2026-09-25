@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
+import { Copilot } from "@/components/copilot";
 import {
   dashboardApi,
   leadsApi,
@@ -511,64 +512,13 @@ export default function DashboardPage() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {/* Recent Activity */}
-                <div className="bg-card rounded-2xl border border-border shadow-card p-6">
-                  <h2 className="text-lg font-semibold text-foreground mb-4">
-                    Recent Activity
-                  </h2>
-                  <div className="space-y-4">
-                    {[
-                      {
-                        action: "New lead qualified",
-                        detail: "Ahmed Al-Rashid - Downtown Dubai",
-                        time: "2 min ago",
-                        icon: Users,
-                      },
-                      {
-                        action: "Site visit scheduled",
-                        detail: "Maria Gonzalez - Dubai Marina",
-                        time: "15 min ago",
-                        icon: Calendar,
-                      },
-                      {
-                        action: "Property scraped",
-                        detail: "45 new listings from Bayut",
-                        time: "1 hour ago",
-                        icon: Building2,
-                      },
-                      {
-                        action: "Deal closed",
-                        detail: "Raj Patel - AED 8.5M villa",
-                        time: "3 hours ago",
-                        icon: DollarSign,
-                      },
-                    ].map((activity, i) => {
-                      const Icon = activity.icon;
-                      return (
-                        <div key={i} className="flex items-start gap-3">
-                          <div className="p-2 bg-brand/5 rounded-lg">
-                            <Icon className="w-4 h-4 text-brand" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-foreground">
-                              {activity.action}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {activity.detail}
-                            </p>
-                          </div>
-                          <span className="text-xs text-muted-foreground/70">
-                            {activity.time}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+                <div className="lg:col-span-3">
+                  <Copilot />
                 </div>
 
                 {/* Lead Sources */}
-                <div className="bg-card rounded-2xl border border-border shadow-card p-6">
+                <div className="lg:col-span-2 bg-card rounded-2xl border border-border shadow-card p-6">
                   <h2 className="text-lg font-semibold text-foreground mb-4">
                     Lead Sources
                   </h2>

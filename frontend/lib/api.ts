@@ -1123,10 +1123,179 @@ export interface CoworkTask {
   created_at: string;
 }
 
+export type ProviderCategory = "crm" | "portal" | "messaging" | "email" | "calendar" | "ai" | "data";
+export type ConnectionHealth = "connected" | "degraded" | "not_configured" | "paused" | "error" | "untested";
+
+export interface ProviderField {
+  key: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  placeholder: string;
+  help: string;
+}
+
+export interface ProviderSpec {
+  id: string;
+  name: string;
+  category: ProviderCategory;
+  description: string;
+  auth: "api_key" | "oauth_token" | "webhook_secret" | "feed_url" | "none";
+  capabilities: string[];
+  fields: ProviderField[];
+  inbound_webhook: boolean;
+  certification: string | null;
+  docs_url: string | null;
+  test_method: string;
+  tags: string[];
+}
+
+export interface Connection {
+  id: string;
+  provider: string;
+  provider_name: string;
+  category: ProviderCategory;
+  display_name: string;
+  config: Record<string, string>;
+  status: "active" | "paused";
+  health: ConnectionHealth;
+  missing: string[];
+  capabilities: string[];
+  inbound_webhook: boolean;
+  has_webhook_secret: boolean;
+  certification: string | null;
+  last_test_at: string | null;
+  last_test_status: "ok" | "failed" | "skipped" | null;
+  last_test_detail: string | null;
+  last_error: string | null;
+  last_activity_at: string | null;
+  received_total: number;
+  created_at: string;
+}
+
+export interface ConnectionInput {
+  provider: string;
+  display_name?: string | null;
+  config: Record<string, string>;
+  enabled?: boolean;
+}
+
+export interface ConnectionPatch {
+  display_name?: string | null;
+  config?: Record<string, string>;
+  enabled?: boolean;
+  rotate_webhook_secret?: boolean;
+}
+
+export interface ConnectionTestResult {
+  status: "ok" | "failed" | "skipped";
+  detail: string;
+  [k: string]: unknown;
+}
+
+export interface WebhookTestResult {
+  status: string;
+  detail: string;
+  url: string;
+  count?: number;
+  records?: Record<string, unknown>[];
+  sample: Record<string, unknown>;
+  error?: string;
+}
+
+export interface RoutineSchedule {
+  kind: "interval" | "daily" | "weekly";
+  seconds?: number | null;
+  at?: string | null;
+  weekday?: number | null;
+  tz?: string;
+}
+
+export interface RoutineStep {
+  id?: string | null;
+  type: string;
+  connection_id?: string | null;
+  params: Record<string, unknown>;
+}
+
+export interface Routine {
+  id: string;
+  name: string;
+  description: string | null;
+  schedule: RoutineSchedule;
+  schedule_label: string;
+  steps: RoutineStep[];
+  enabled: boolean;
+  template_id: string | null;
+  run_count: number;
+  last_run_at: string | null;
+  last_status: "success" | "partial" | "failed" | null;
+  next_run_at: string | null;
+  created_at: string;
+}
+
+export interface RoutineInput {
+  name: string;
+  description?: string | null;
+  schedule: RoutineSchedule;
+  steps: RoutineStep[];
+  enabled?: boolean;
+  template_id?: string | null;
+}
+
+export interface RoutineStepResult {
+  id: string | null;
+  type: string;
+  status: "success" | "failed" | "skipped" | "simulated";
+  summary: Record<string, unknown>;
+  error: string | null;
+  duration_ms: number;
+}
+
+export interface RoutineRun {
+  id: string;
+  routine_id: string;
+  routine_name: string | null;
+  trigger: string;
+  actor: string | null;
+  status: "running" | "success" | "partial" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  steps: RoutineStepResult[];
+  summary: { leads?: number; viewings?: number; listing_issues?: number; digest?: string | null };
+  error: string | null;
+}
+
+export interface RoutineStepSpec {
+  type: string;
+  label: string;
+  group: "connector" | "data" | "llm";
+  needs_connection: boolean;
+  capability?: string;
+  params: string[];
+}
+
+export interface RoutineTemplate {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  schedule: RoutineSchedule;
+  steps: { type: string; provider?: string | null; params?: Record<string, unknown> }[];
+}
+
+export interface RoutineCatalog {
+  steps: RoutineStepSpec[];
+  templates: RoutineTemplate[];
+  stages: string[];
+  jobs: { id: string; label: string }[];
+}
+
 export interface AuditEntry {
   id: string;
   at: string | null;
-  kind: "job" | "automation";
+  kind: "job" | "automation" | "routine";
   subject: string;
   status: string | null;
   trigger: string | null;
@@ -1139,6 +1308,8 @@ export interface CoworkOverview {
   jobs: { total: number; enabled: number; failing: number };
   runs: { window_hours: number; runs: number; failed: number; success_rate: number | null; avg_duration_ms: number | null; last_failure: JobRun | null };
   automations: { total: number; enabled: number; fired_total: number };
+  connections: { total: number } & Partial<Record<ConnectionHealth, number>>;
+  routines: { total: number; enabled: number; failing: number };
   tasks_open: number;
   review_open: number;
 }
@@ -1177,4 +1348,102 @@ export const coworkApi = {
   patchTask: (id: string, status: CoworkTask["status"]) =>
     fetchApi<CoworkTask>(`/api/v1/cowork/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
   audit: (limit = 100) => fetchApi<AuditEntry[]>(`/api/v1/cowork/audit?limit=${limit}`),
+
+  providerCatalog: () => fetchApi<ProviderSpec[]>("/api/v1/cowork/connections/catalog"),
+  connections: () => fetchApi<{ connections: Connection[]; counts: Partial<Record<ConnectionHealth, number>> }>("/api/v1/cowork/connections"),
+  createConnection: (input: ConnectionInput) => fetchApi<Connection>("/api/v1/cowork/connections", { method: "POST", body: JSON.stringify(input) }),
+  patchConnection: (id: string, patch: ConnectionPatch) =>
+    fetchApi<Connection>(`/api/v1/cowork/connections/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteConnection: (id: string) => fetchApi<{ deleted: boolean }>(`/api/v1/cowork/connections/${id}`, { method: "DELETE" }),
+  testConnection: (id: string) => fetchApi<ConnectionTestResult>(`/api/v1/cowork/connections/${id}/test`, { method: "POST" }),
+  testWebhook: (id: string) => fetchApi<WebhookTestResult>(`/api/v1/cowork/connections/${id}/webhook/test`, { method: "POST" }),
+  revealWebhook: (id: string) => fetchApi<{ url: string; secret: string; signature_header: string; algorithm: string }>(`/api/v1/cowork/connections/${id}/webhook`),
+
+  routineCatalog: () => fetchApi<RoutineCatalog>("/api/v1/cowork/routines/catalog"),
+  routines: () => fetchApi<Routine[]>("/api/v1/cowork/routines"),
+  createRoutine: (input: RoutineInput) => fetchApi<Routine>("/api/v1/cowork/routines", { method: "POST", body: JSON.stringify(input) }),
+  routineFromTemplate: (templateId: string) =>
+    fetchApi<Routine>("/api/v1/cowork/routines/from-template", { method: "POST", body: JSON.stringify({ template_id: templateId }) }),
+  patchRoutine: (id: string, patch: Partial<RoutineInput>) =>
+    fetchApi<Routine>(`/api/v1/cowork/routines/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteRoutine: (id: string) => fetchApi<{ deleted: boolean }>(`/api/v1/cowork/routines/${id}`, { method: "DELETE" }),
+  runRoutine: (id: string) => fetchApi<RoutineRun>(`/api/v1/cowork/routines/${id}/run`, { method: "POST" }),
+  routineRuns: (routineId?: string, limit = 50) =>
+    fetchApi<RoutineRun[]>(`/api/v1/cowork/routines/runs?limit=${limit}${routineId ? `&routine_id=${routineId}` : ""}`),
+};
+
+// ---------------------------------------------------------------------------
+// Analytics + Copilot (typed questions over the pipeline)
+// ---------------------------------------------------------------------------
+
+export type AnalyticsMetric =
+  | "top_leads"
+  | "area_demand"
+  | "leads_for_area"
+  | "stale_leads"
+  | "source_mix"
+  | "pipeline"
+  | "score_changes"
+  | "new_leads"
+  | "viewings"
+  | "budget_bands";
+
+export interface AnalyticsQuery {
+  metric: AnalyticsMetric;
+  area?: string | null;
+  band?: "hot" | "warm" | "cold" | null;
+  stage?: string | null;
+  source?: string | null;
+  purpose?: "buy" | "rent" | "invest" | null;
+  property_type?: string | null;
+  min_budget_aed?: number | null;
+  max_budget_aed?: number | null;
+  days?: number;
+  stale_hours?: number;
+  limit?: number;
+}
+
+export interface AnalyticsLeadRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  score: number;
+  band: "hot" | "warm" | "cold";
+  stage: string;
+  areas: string[];
+  budget_max_aed: number | null;
+  purpose: string | null;
+  property_type: string | null;
+  source: string | null;
+  last_contact_at?: string | null;
+  hours_silent?: number | null;
+  delta?: number | null;
+}
+
+export type AnalyticsRow = AnalyticsLeadRow | Record<string, string | number | null>;
+
+export interface AnalyticsAction {
+  type: string;
+  label: string;
+  lead_ids?: string[];
+}
+
+export interface AnalyticsResult {
+  query: AnalyticsQuery;
+  title: string;
+  rows: AnalyticsRow[];
+  total: number;
+  summary: string;
+  suggested_actions: AnalyticsAction[];
+}
+
+export function isLeadRow(row: AnalyticsRow): row is AnalyticsLeadRow {
+  return typeof row === "object" && row !== null && "band" in row && "score" in row && "name" in row;
+}
+
+export const analyticsApi = {
+  questions: () => fetchApi<{ questions: string[] }>("/api/v1/analytics/questions"),
+  query: (query: AnalyticsQuery) => fetchApi<AnalyticsResult>("/api/v1/analytics/query", { method: "POST", body: JSON.stringify(query) }),
+  ask: (question: string, limit = 5) =>
+    fetchApi<AnalyticsResult>("/api/v1/analytics/ask", { method: "POST", body: JSON.stringify({ question, limit }) }),
 };

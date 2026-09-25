@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { navigationForRole } from "./navigation";
 
 describe("navigationForRole", () => {
-  it("hides administration from agents", () => {
+  it("gives agents the working set including Operations, but not administration", () => {
     const hrefs = navigationForRole("agent").map((item) => item.href);
-    expect(hrefs).toEqual(["/", "/dashboard", "/broker", "/broker/pipeline", "/properties", "/market", "/automations"]);
-    expect(hrefs).not.toContain("/cowork");
+    expect(hrefs).toEqual(["/", "/dashboard", "/broker", "/broker/pipeline", "/properties", "/market", "/cowork"]);
+    expect(hrefs).not.toContain("/automations");
     expect(hrefs).not.toContain("/configure");
     expect(hrefs).not.toContain("/members");
   });
