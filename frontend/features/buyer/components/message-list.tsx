@@ -48,7 +48,7 @@ function MessageBubble({
               </span>
             ))}
           </div>
-          <p className="mt-1 text-end text-[11px] text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" dir="ltr">
+          <p className="mt-1 text-end text-[11px] text-muted-foreground transition-colors [@media(hover:hover)]:text-muted-foreground/0 [@media(hover:hover)]:group-hover:text-muted-foreground" dir="ltr">
             {time}
           </p>
         </div>
@@ -90,7 +90,7 @@ function MessageBubble({
           </div>
         )}
 
-        <p className="text-[11px] text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" dir="ltr">
+        <p className="text-[11px] text-muted-foreground transition-colors [@media(hover:hover)]:text-muted-foreground/0 [@media(hover:hover)]:group-hover:text-muted-foreground" dir="ltr">
           {time}
         </p>
       </div>
@@ -128,7 +128,8 @@ export function MessageList({
         {isLoading && (
           <div className="flex items-center gap-3 text-sm text-muted-foreground" role="status">
             <AssistantMark />
-            <span className="flex items-center gap-1" aria-label={t.thinking}>
+            <span className="sr-only">{t.thinking}</span>
+            <span className="flex items-center gap-1" aria-hidden="true">
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60" />

@@ -23,10 +23,9 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
+        {kicker && <p className="ui-kicker mb-1.5">{kicker}</p>}
         <h1 className="font-display text-[34px] leading-none text-foreground">{title}</h1>
-        {(description || kicker) && (
-          <p className="mt-2 max-w-[60ch] text-sm text-muted-foreground">{description ?? kicker}</p>
-        )}
+        {description && <p className="mt-2 max-w-[60ch] text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </header>
