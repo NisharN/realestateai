@@ -7,6 +7,13 @@ def test_number_words_scales():
     assert number_words(2) == "two"
 
 
+def test_number_words_keeps_every_digit_of_non_round_prices():
+    assert number_words(1234567) == "one million two hundred thirty four thousand five hundred sixty seven"
+    assert number_words(2050000) == "two point zero five million"
+    assert number_words(3000000) == "three million"
+    assert "four thousand five hundred sixty seven" in speakify("AED 1,234,567")
+
+
 def test_aed_prices_are_spoken_not_read_digit_by_digit():
     out = speakify("Priced at AED 1,850,000 in Dubai Marina.")
     assert "1,850,000" not in out

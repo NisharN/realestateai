@@ -2,6 +2,7 @@
 review queue, connectors, field maps, admin/data-health endpoints."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -427,6 +428,26 @@ async def test_crm_writeback_patches_crm_once_per_event():
     assert again == 0  # offsets: redelivery is a no-op
 
 
+async def test_crm_writeback_escapes_external_id_in_url():
+    from app.modules.ingestion.connectors.crm_pull import CrmPullConnector
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={})
+
+    connector = {"id": "c1", "type": "generic_crm", "config": {"url": "https://crm.test/leads", "write_back_url": "https://crm.test/leads/{id}"}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        await CrmPullConnector(connector, client=http).write_back({"crm_external_id": "../x?admin=1#f"}, {"score": 1})
+    assert seen == ["https://crm.test/leads/..%2Fx%3Fadmin%3D1%23f"]
+
+    connector["config"]["write_back_url"] = "https://{id}.crm.test/leads"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(ValueError):
+            await CrmPullConnector(connector, client=http).write_back({"crm_external_id": "evil"}, {"score": 1})
+
+
 async def test_crm_writeback_skips_leads_without_writeback_connector():
     from app.modules.ingestion.writeback import run_writeback
 
@@ -478,3 +499,91 @@ async def test_pending_events_are_not_capped_by_processed_prefix():
     await events.emit(lead["id"], "lead.updated", {"n": 451}, workspace_id=WS)
     assert await events.consume(WS, "t", handler, limit=100) == 1
     assert len(seen) == 451 and len(set(seen)) == 451
+
+
+# -- PR #8 review regressions ----------------------------------------------
+
+def test_field_map_invalid_target_keeps_approved_map():
+    created = client.post("/api/v1/admin/connectors", json={"type": "csv_upload", "display_name": "Portal export"}).json()
+    ok = client.put(f"/api/v1/admin/connectors/{created['id']}/field-map", json={"mappings": [{"source_field": "Tel", "target_field": "phone"}]})
+    assert ok.status_code == 200
+    bad = client.put(f"/api/v1/admin/connectors/{created['id']}/field-map", json={"mappings": [{"source_field": "Tel", "target_field": "not_a_field"}]})
+    assert bad.status_code == 400
+    got = client.get(f"/api/v1/admin/connectors/{created['id']}/field-map").json()
+    assert {m["source_field"]: m["target_field"] for m in got["approved"]} == {"Tel": "phone"}
+
+
+def test_webhook_without_stored_secret_is_rejected():
+    created = client.post("/api/v1/admin/connectors", json={"type": "webhook", "display_name": "Website"}).json()
+    asyncio.get_event_loop().run_until_complete(table("connectors", WS).update({"secret": None}, id=created["id"]))
+    body = json.dumps({"id": "w-9", "phone": "0501112222"}).encode()
+    resp = client.post(f"/api/v1/ingest/webhook/{created['id']}?workspace_id={WS}", content=body)
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "connector_unsigned"
+
+
+def test_connector_config_credentials_are_redacted():
+    created = client.post(
+        "/api/v1/admin/connectors",
+        json={"type": "generic_crm", "credential": "tok", "config": {"url": "https://crm.test/leads", "auth_header": "X-Api-Key", "extra_params": {"api_key": "plain-text-key"}, "webhook_token": "t0k"}},
+    ).json()
+    assert "secret" not in created
+    assert created["config"]["extra_params"]["api_key"] == "[redacted]"
+    assert created["config"]["webhook_token"] == "[redacted]"
+    assert created["config"]["auth_header"] == "X-Api-Key" and created["config"]["url"] == "https://crm.test/leads"
+    listed = client.get("/api/v1/admin/connectors").json()
+    assert all(c["config"].get("webhook_token") in (None, "[redacted]") for c in listed)
+
+
+def test_csv_upload_rejects_oversized_file_before_parsing():
+    from app.api import ingest as ingest_api
+
+    big = b"phone\n" + b"0501234567\n" * (ingest_api.MAX_CSV_BYTES // 11 + 10)
+    resp = client.post("/api/v1/ingest/csv", files={"file": ("big.csv", big, "text/csv")})
+    assert resp.status_code == 413
+
+
+async def test_suppressed_phone_and_email_go_to_review():
+    await table("suppression_list", WS).insert({"id": "s1", "phone": "+971501110000", "email": None, "reason": "opt_out", "created_at": "2026-01-01T00:00:00+00:00"})
+    await table("suppression_list", WS).insert({"id": "s2", "phone": None, "email": "no@example.com", "reason": "opt_out", "created_at": "2026-01-01T00:00:00+00:00"})
+    result = await land([RawRecord(external_id="p1", payload={"phone": "0501110000", "name": "Sup"}), RawRecord(external_id="e1", payload={"email": "NO@example.com", "name": "Sup2"})], connector_id="csv", workspace_id=WS)
+    outcomes = [await process_record(rid, workspace_id=WS) for rid in result.ids]
+    assert [o.status for o in outcomes] == ["review", "review"]
+    assert await get_lead_repository(WS).list_all(limit=10) == []
+
+
+async def test_opted_out_lead_is_not_enriched_by_reimport():
+    lead = await get_lead_repository(WS).create({"phone": "+971502220000", "first_name": "Out", "source": "csv_upload", "opted_out_at": "2026-01-01T00:00:00+00:00"})
+    result = await land([RawRecord(external_id="r1", payload={"phone": "0502220000", "name": "Out", "budget": "2M"})], connector_id="csv", workspace_id=WS)
+    outcome = await process_record(result.ids[0], workspace_id=WS)
+    assert outcome.status == "review" and "suppressed" in outcome.reasons
+    assert (await get_lead_repository(WS).get_by_id(lead["id"])).get("budget_max_aed") is None
+
+
+async def test_repeat_crm_update_does_not_duplicate_lead_sources():
+    for i in range(2):
+        result = await land([RawRecord(external_id="crm-7", payload={"id": "crm-7", "phone": "0503330000", "name": "Rep", "budget": f"{i + 1}M"})], connector_id="crm", workspace_id=WS)
+        outcome = await process_record(result.ids[0], workspace_id=WS)
+        assert outcome.status == "published"
+    assert await table("lead_sources", WS).count(external_id="crm-7") == 1
+
+
+async def test_broker_edited_fields_survive_crm_merge():
+    lead = await get_lead_repository(WS).create({"phone": "+971504440000", "first_name": "Bro", "source": "csv_upload", "budget_max_aed": 900_000, "broker_edited_fields": ["budget_max_aed"]})
+    result = await land([RawRecord(external_id="b1", payload={"phone": "0504440000", "name": "Bro", "budget": "3M"})], connector_id="csv", workspace_id=WS)
+    await process_record(result.ids[0], workspace_id=WS)
+    assert (await get_lead_repository(WS).get_by_id(lead["id"]))["budget_max_aed"] == 900_000
+
+
+def test_pin_crm_url_connects_to_checked_address(monkeypatch):
+    import socket
+
+    from app.modules.ingestion.connectors.crm_pull import pin_crm_url
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
+    pinned = pin_crm_url("https://crm.example.com/leads?x=1")
+    assert pinned.url == "https://93.184.216.34/leads?x=1"
+    assert pinned.headers == {"Host": "crm.example.com"} and pinned.extensions == {"sni_hostname": "crm.example.com"}
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)), (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))])
+    with pytest.raises(ValueError):
+        pin_crm_url("https://crm.example.com/leads")

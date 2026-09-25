@@ -287,13 +287,17 @@ function VoiceModal({
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Barge-in: stop whatever Ali is saying (server turn + local playback).
-  const stopSpeaking = useCallback(() => {
-    wsRef.current?.interrupt();
+  const stopPlayback = useCallback(() => {
     audioRef.current?.pause();
     audioRef.current = null;
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
   }, []);
+
+  // Barge-in: stop whatever Ali is saying (server turn + local playback).
+  const stopSpeaking = useCallback(() => {
+    wsRef.current?.interrupt();
+    stopPlayback();
+  }, [stopPlayback]);
 
   const speak = useCallback((msg: Extract<VoiceServerMessage, { type: "reply" }>) => {
     if (msg.audio) {
@@ -399,8 +403,9 @@ function VoiceModal({
     return () => {
       ws.disconnect();
       wsRef.current = null;
+      stopPlayback();
     };
-  }, [isOpen, leadId, speak]);
+  }, [isOpen, leadId, speak, stopPlayback]);
 
   const startRecording = async () => {
     stopSpeaking();

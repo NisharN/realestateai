@@ -22,9 +22,10 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -78,7 +79,8 @@ class CrmPullConnector:
         return headers
 
     async def fetch_since(self, cursor: str | None) -> tuple[list[RawRecord], str | None]:
-        url = validate_crm_url(self.config.get("url"), resolve=self._client is None)
+        url = validate_crm_url(self.config.get("url"))
+        pinned = pin_crm_url(url) if self._client is None else PinnedUrl(url, {}, {})
         cursor_param = self.config.get("cursor_param") or "updated_after"
         cursor_field = self.config.get("cursor_field") or "updated_at"
         id_field = self.config.get("id_field") or "id"
@@ -93,7 +95,7 @@ class CrmPullConnector:
                 params = dict(self.config.get("extra_params") or {})
                 if next_cursor:
                     params[cursor_param] = next_cursor
-                resp = await client.get(url, params=params, headers=self._headers())
+                resp = await client.get(pinned.url, params=params, headers={**self._headers(), **pinned.headers}, extensions=pinned.extensions)
                 if resp.status_code >= 400:
                     raise CrmHttpError(resp.status_code)
                 body = resp.json()
@@ -132,10 +134,14 @@ class CrmPullConnector:
         external_id = lead.get("crm_external_id")
         if not url or not external_id:
             return
-        validate_crm_url(url, resolve=self._client is None)
+        validate_crm_url(url)
+        target = url.replace("{id}", quote(str(external_id), safe=""))
+        if urlsplit(target)[:2] != urlsplit(url)[:2]:
+            raise ValueError("CRM external id altered the write-back host")
+        pinned = pin_crm_url(target) if self._client is None else PinnedUrl(target, {}, {})
         client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S)
         try:
-            resp = await client.patch(url.replace("{id}", str(external_id)), json=fields, headers=self._headers())
+            resp = await client.patch(pinned.url, json=fields, headers={**self._headers(), **pinned.headers}, extensions=pinned.extensions)
             if resp.status_code >= 400:
                 raise CrmHttpError(resp.status_code)
         finally:
@@ -192,12 +198,49 @@ def safe_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+@dataclass(frozen=True)
+class PinnedUrl:
+    """A validated URL whose connection is pinned to the address we checked.
+
+    ``url`` has the resolved public IP as host; ``headers``/``extensions`` carry
+    the original hostname for the Host header and TLS SNI, so a DNS answer that
+    changes between the check and the connect cannot redirect us inward.
+    """
+
+    url: str
+    headers: dict[str, str]
+    extensions: dict[str, str]
+
+
+def pin_crm_url(url: str) -> PinnedUrl:
+    parts = urlsplit(validate_crm_url(url, resolve=True))
+    host = (parts.hostname or "").lower()
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return PinnedUrl(url, {}, {})
+    except ValueError:
+        pass
+    infos = socket.getaddrinfo(host, parts.port or 443, proto=socket.IPPROTO_TCP)
+    ips = [ipaddress.ip_address(i[4][0]) for i in infos]
+    for ip in ips:
+        _reject_internal(ip)
+    ip = ips[0]
+    netloc = f"[{ip}]" if ip.version == 6 else str(ip)
+    if parts.port:
+        netloc += f":{parts.port}"
+    pinned = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    host_header = host if not parts.port else f"{host}:{parts.port}"
+    return PinnedUrl(pinned, {"Host": host_header}, {"sni_hostname": host})
+
+
 def validate_crm_url(url: Any, *, resolve: bool = False) -> str:
     """Only public HTTPS hosts: the poller runs inside the backend network.
 
     ``resolve=True`` additionally resolves the hostname and rejects any address
     that is not public (DNS pointing at internal services). Redirects are never
-    followed (httpx default), so a public host cannot bounce us inward.
+    followed (httpx default), so a public host cannot bounce us inward. Live
+    requests go through :func:`pin_crm_url` so the checked address is the one
+    connected to.
     """
     if not url or not isinstance(url, str):
         raise ValueError("connector config.url is required")

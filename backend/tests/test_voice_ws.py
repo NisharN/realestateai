@@ -111,6 +111,17 @@ def test_unknown_message_is_recoverable_error():
         assert err["type"] == "error" and err["recoverable"] is True
 
 
+def test_oversized_audio_frame_is_rejected_without_closing():
+    lead_id = _lead()
+    with _connect(lead_id) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "audio", "turn_id": "big", "data": "A" * (voice_api.MAX_AUDIO_B64_CHARS + 1)})
+        err = ws.receive_json()
+        assert err["type"] == "error" and err["code"] == "audio_too_large" and err["recoverable"] is True
+        ws.send_json({"type": "text", "text": "hi"})
+        assert ws.receive_json()["type"] == "transcript"
+
+
 def test_resume_replays_history():
     lead_id = _lead()
     with _connect(lead_id) as ws:

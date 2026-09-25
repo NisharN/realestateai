@@ -182,3 +182,58 @@ def test_broker_today_pipeline_detail_and_edit():
 
     assert client.get("/api/v1/broker/leads/missing").status_code == 404
     assert client.post("/api/v1/broker/handoffs/reassign-stale").json() == {"reassigned": 0, "escalated": 0}
+
+
+# -- PR #8 review regressions ----------------------------------------------
+
+async def test_failed_send_stays_pending_and_due_rows_come_first():
+    from unittest.mock import patch
+
+    from app.services.whatsapp import OutboundMessage
+
+    lead = await _lead()
+    due = datetime(2026, 9, 25, 10, 0, tzinfo=DUBAI)
+    fu = table("followups", WS)
+    for touch in range(1, 4):
+        await fu.insert({"lead_id": lead["id"], "touch": touch, "template_key": "followup_1", "due_at": (due + timedelta(days=touch)).isoformat(), "status": "pending"})
+    await fu.insert({"lead_id": lead["id"], "touch": 9, "template_key": "followup_1", "due_at": (due - timedelta(hours=1)).isoformat(), "status": "pending"})
+
+    async def failing(*_args, **_kwargs):
+        return OutboundMessage(id="m1", to="x", body="y", status="failed", error="provider down")
+
+    with patch("app.modules.handoff.followups.get_whatsapp_service") as svc:
+        svc.return_value.send_text = failing
+        assert await followups.send_due(WS, now=due, limit=2) == []
+    row = (await fu.select(touch=9))[0]
+    assert row["status"] == "pending" and row["attempts"] == 1 and "provider down" in row["error"]
+
+    sent = await followups.send_due(WS, now=due, limit=2)
+    assert [s["touch"] for s in sent] == [9]
+
+
+def test_agent_without_broker_profile_gets_403_and_no_unassigned_followups():
+    import asyncio
+
+    from app.auth import RequestContext, WorkspaceRole, get_request_context
+
+    loop = asyncio.get_event_loop()
+    lead = loop.run_until_complete(_lead())
+    loop.run_until_complete(table("followups", WS).insert({"lead_id": lead["id"], "touch": 1, "template_key": "followup_1", "due_at": "2026-09-25T06:00:00+00:00", "status": "pending"}))
+
+    async def unprofiled():
+        return RequestContext(user_id="u", workspace_id=WS, role=WorkspaceRole.AGENT, broker_id=None)
+
+    async def agent():
+        return RequestContext(user_id="u", workspace_id=WS, role=WorkspaceRole.AGENT, broker_id="broker-2")
+
+    try:
+        app.dependency_overrides[get_request_context] = unprofiled
+        assert client.get("/api/v1/broker/today").status_code == 403
+        assert client.get("/api/v1/broker/pipeline").status_code == 403
+        assert client.get(f"/api/v1/broker/leads/{lead['id']}").status_code in (403, 404)
+        app.dependency_overrides[get_request_context] = agent
+        assert client.get("/api/v1/broker/followups").json() == []
+        assert client.get("/api/v1/broker/today").json()["counts"]["followups_due"] == 0
+    finally:
+        app.dependency_overrides.clear()
+    assert client.get("/api/v1/broker/followups").json() != []

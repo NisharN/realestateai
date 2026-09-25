@@ -26,6 +26,7 @@ from app.database import get_lead_repository
 from app.modules.agents import extractor, scorer
 from app.modules.agents.responder import respond
 from app.modules.ingestion import events
+from app.modules.ingestion.pipeline.processor import suppress_contact
 from app.modules.handoff import followups
 from app.modules.handoff.service import create_handoff
 from app.modules.leads.profile import lead_updates_from_state, merge
@@ -374,6 +375,9 @@ async def _schedule_followups(state: ConversationState, move: Move, workspace_id
     try:
         if move == Move.OPT_OUT:
             await followups.cancel_followups(state.lead_id, workspace_id=workspace_id, reason="opt_out")
+            lead = await get_lead_repository(workspace_id).get_by_id(state.lead_id)
+            if lead:
+                await suppress_contact(workspace_id, phone=lead.get("phone_e164") or lead.get("phone"), email=lead.get("email"), reason="opt_out")
         elif move in {Move.HANDOFF, Move.HANDOFF_NOW}:
             await followups.cancel_followups(state.lead_id, workspace_id=workspace_id, reason="handed_off")
         elif move == Move.NURTURE:

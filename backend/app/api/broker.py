@@ -24,12 +24,14 @@ BROKER_EDITABLE = ("purpose", "budget_min_aed", "budget_max_aed", "budget_period
 def _broker_scope(context: RequestContext, broker_id: str | None) -> str | None:
     """Agents only see their own leads; owners/admins may pass any broker or none (all)."""
     if context.role == WorkspaceRole.AGENT:
+        if not context.broker_id:
+            raise HTTPException(status_code=403, detail={"code": "no_broker_profile", "message": "This account is not linked to a broker profile"})
         return context.broker_id
     return broker_id
 
 
 def _visible(context: RequestContext, lead: dict[str, Any]) -> bool:
-    return context.role != WorkspaceRole.AGENT or lead.get("assigned_broker") == context.broker_id
+    return context.role != WorkspaceRole.AGENT or (context.broker_id is not None and lead.get("assigned_broker") == context.broker_id)
 
 
 def _lead_stage(lead: dict[str, Any]) -> str:
@@ -95,14 +97,14 @@ async def broker_today(broker_id: str | None = None, context: RequestContext = D
             "accepted": len(accepted),
             "hot_leads": len(hot),
             "viewings": len(viewings),
-            "followups_due": len([f for f in await followups.pending_for_broker(ws, scope, limit=200) if f["due_at"][:10] <= today]),
+            "followups_due": len([f for f in await followups.pending_for_broker(ws, scope, limit=200, include_unassigned=context.role != WorkspaceRole.AGENT) if f["due_at"][:10] <= today]),
             "escalated": len(escalated),
         },
         "new_handoffs": await with_lead(pending),
         "accepted_handoffs": await with_lead(accepted[:20]),
         "hot_leads": [_summary(l) for l in hot[:20]],
         "viewings": viewings,
-        "followups": await followups.pending_for_broker(ws, scope, limit=20),
+        "followups": await followups.pending_for_broker(ws, scope, limit=20, include_unassigned=context.role != WorkspaceRole.AGENT),
         "escalated": await with_lead(escalated),
     }
 
@@ -258,7 +260,7 @@ async def list_handoffs(status: str | None = None, broker_id: str | None = None,
 
 @router.get("/followups")
 async def list_followups(broker_id: str | None = None, limit: int = 50, context: RequestContext = Depends(get_request_context)):
-    return await followups.pending_for_broker(context.workspace_id, _broker_scope(context, broker_id), limit=min(limit, 200))
+    return await followups.pending_for_broker(context.workspace_id, _broker_scope(context, broker_id), limit=min(limit, 200), include_unassigned=context.role != WorkspaceRole.AGENT)
 
 
 @router.post("/followups/send-due")

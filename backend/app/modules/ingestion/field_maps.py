@@ -103,13 +103,17 @@ async def approved_field_map(connector_id: str, workspace_id: str) -> dict[str, 
 async def save_field_map(
     connector_id: str, workspace_id: str, mappings: list[dict[str, Any]], *, approved_by: str | None
 ) -> list[Row]:
+    for m in mappings:
+        target = m.get("target_field")
+        if target is not None and target not in CANONICAL_FIELDS:
+            raise ValueError(f"unknown target field: {target}")
+        if not m.get("source_field"):
+            raise ValueError("source_field is required")
     fm = table("field_maps", workspace_id)
     await fm.delete(connector_id=connector_id)
     saved: list[Row] = []
     for m in mappings:
         target = m.get("target_field")
-        if target is not None and target not in CANONICAL_FIELDS:
-            raise ValueError(f"unknown target field: {target}")
         saved.append(
             await fm.insert(
                 {

@@ -42,6 +42,8 @@ THINKING_AFTER_S = 1.2
 LOW_CONFIDENCE = 0.6
 ENGINE_DRAIN_S = 15.0
 MAX_TTS_CHARS = 600
+MAX_AUDIO_BYTES = 2 * 1024 * 1024  # one utterance (~60 s of 16 kHz mono PCM), not a stream
+MAX_AUDIO_B64_CHARS = MAX_AUDIO_BYTES * 4 // 3 + 4
 YES_WORDS = {"yes", "yeah", "yep", "correct", "right", "نعم", "ايوه", "أيوه", "صح"}
 
 
@@ -265,6 +267,8 @@ async def voice_conversation(
                     await _send(websocket, {"type": "pong"})
             elif kind == "interrupt":
                 await session.interrupt()
+            elif kind == "audio" and len(message.get("data") or "") > MAX_AUDIO_B64_CHARS:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "audio_too_large", "recoverable": True, "max_bytes": MAX_AUDIO_BYTES})
             elif kind in {"audio", "text"}:
                 await session.interrupt()  # a new utterance always wins over an in-flight reply
                 session.start_turn(message)
