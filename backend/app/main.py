@@ -15,6 +15,7 @@ from app.api import (
     billing,
     broker,
     conversations,
+    cowork,
     dashboard,
     ingest,
     ingestion,
@@ -139,6 +140,7 @@ app.include_router(broker.router, prefix="/api/v1/broker", tags=["Broker"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
 app.include_router(market.router, prefix="/api/v1/market", tags=["Market"])
 app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])
+app.include_router(cowork.router, prefix="/api/v1/cowork", tags=["Co-work"])
 
 
 if __name__ == "__main__":

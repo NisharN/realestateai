@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # --- LLM gateway (architecture §10) ---
     # Ordered provider chain. Every call has a deadline; when the whole chain
     # fails the caller falls back to rules / templates, never to an error.
+    # Standalone real-estate CRM (system of record once deployed)
+    CRM_BASE_URL: str = ""
+    CRM_API_KEY: str = ""
+    CRM_WEBHOOK_SECRET: str = ""
+
     LLM_PROVIDERS: str = "groq,secondary,ollama"
     LLM_SECONDARY_API_KEY: str = ""
     LLM_SECONDARY_BASE_URL: str = ""          # any OpenAI-compatible endpoint

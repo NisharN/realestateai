@@ -49,29 +49,11 @@ celery_app.conf.update(
             "task": "app.worker.run_workflow_templates",
             "schedule": 300.0,  # every 5 minutes
         },
-        "reassign-stale-handoffs": {
-            "task": "app.worker.reassign_stale_handoffs",
-            "schedule": 60.0,
-        },
-        "send-due-followups": {
-            "task": "app.worker.send_due_followups",
-            "schedule": 300.0,
-        },
-        "retry-ingestion-errors": {
-            "task": "app.worker.retry_ingestion_errors",
-            "schedule": 120.0,
-        },
-        "poll-pull-connectors": {
-            "task": "app.worker.poll_pull_connectors",
-            "schedule": 60.0,
-        },
-        "crm-writeback": {
-            "task": "app.worker.crm_writeback",
-            "schedule": 60.0,
-        },
-        "retention-purge": {
-            "task": "app.worker.retention_purge",
-            "schedule": 86_400.0,
+        # Every other recurring job is described in app.modules.cowork.jobs and
+        # honours per-workspace enable/interval settings from the Co-work page.
+        "cowork-jobs": {
+            "task": "app.worker.run_cowork_jobs",
+            "schedule": 30.0,
         },
     },
 )
@@ -367,67 +349,64 @@ async def _generate_and_store_copy(
 
 
 # --------------------------------------------------------------------------
-# Handoff / follow-up / ingestion timers (single-tenant: WORKSPACE_ID)
+# Co-work jobs (single-tenant: WORKSPACE_ID). The per-job Celery tasks remain
+# callable by name; the beat tick runs whichever ones are due.
 # --------------------------------------------------------------------------
 
-@celery_app.task(name="app.worker.reassign_stale_handoffs")
-def reassign_stale_handoffs() -> int:
-    from app.modules.handoff.service import reassign_stale
+@celery_app.task(name="app.worker.run_cowork_jobs")
+def run_cowork_jobs() -> Dict[str, str]:
+    from app.modules.cowork.jobs import JOBS, run_if_due
 
-    return len(_run_async(reassign_stale(settings.WORKSPACE_ID)))
+    async def _run() -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for spec in JOBS:
+            run = await run_if_due(settings.WORKSPACE_ID, spec.id)
+            if run is not None:
+                out[spec.id] = run["status"]
+        return out
+
+    return _run_async(_run())
+
+
+def _cowork(job_id: str) -> Dict[str, Any]:
+    from app.modules.cowork.jobs import run_job
+
+    return _run_async(run_job(settings.WORKSPACE_ID, job_id, trigger="schedule"))
+
+
+@celery_app.task(name="app.worker.reassign_stale_handoffs")
+def reassign_stale_handoffs() -> Dict[str, Any]:
+    return _cowork("reassign_stale_handoffs")
 
 
 @celery_app.task(name="app.worker.send_due_followups")
-def send_due_followups() -> int:
-    from app.modules.handoff.followups import send_due
-
-    return len(_run_async(send_due(settings.WORKSPACE_ID)))
+def send_due_followups() -> Dict[str, Any]:
+    return _cowork("send_due_followups")
 
 
 @celery_app.task(name="app.worker.retention_purge")
-def retention_purge() -> Dict[str, int]:
-    """PDPL retention: drop old raw payloads, erase idle unconverted leads."""
-    from app.modules.privacy.service import retention_purge as _purge
-
-    return _run_async(_purge(settings.WORKSPACE_ID))
+def retention_purge() -> Dict[str, Any]:
+    return _cowork("retention_purge")
 
 
 @celery_app.task(name="app.worker.retry_ingestion_errors")
-def retry_ingestion_errors() -> int:
-    from app.modules.ingestion.pipeline.processor import process_stranded, retry_errors
-
-    async def _run() -> int:
-        ws = settings.WORKSPACE_ID
-        return len(await retry_errors(ws)) + len(await process_stranded(ws))
-
-    return _run_async(_run())
+def retry_ingestion_errors() -> Dict[str, Any]:
+    return _cowork("retry_ingestion_errors")
 
 
 @celery_app.task(name="app.worker.poll_pull_connectors")
-def poll_pull_connectors() -> int:
-    """Pull every due CRM connector, land its records, then process them."""
-    from app.modules.ingestion.connectors.crm_pull import due_pull_connectors, poll_connector
-
-    async def _run() -> int:
-        ws = settings.WORKSPACE_ID
-        landed = 0
-        for connector in await due_pull_connectors(ws):
-            result = await poll_connector(connector["id"], workspace_id=ws)
-            ids = result.get("raw_ids", [])
-            if ids:
-                process_raw_records.delay(ws, ids)
-            landed += len(ids)
-        return landed
-
-    return _run_async(_run())
+def poll_pull_connectors() -> Dict[str, Any]:
+    return _cowork("poll_pull_connectors")
 
 
 @celery_app.task(name="app.worker.crm_writeback")
-def crm_writeback() -> int:
-    """Drain the lead-event outbox into CRM write-backs (idempotent via consumer_offsets)."""
-    from app.modules.ingestion.writeback import run_writeback
+def crm_writeback() -> Dict[str, Any]:
+    return _cowork("crm_writeback")
 
-    return _run_async(run_writeback(settings.WORKSPACE_ID))
+
+@celery_app.task(name="app.worker.run_automations")
+def run_automations() -> Dict[str, Any]:
+    return _cowork("run_automations")
 
 
 @celery_app.task(name="app.worker.process_raw_records")

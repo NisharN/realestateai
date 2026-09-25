@@ -7,7 +7,6 @@ import {
   BookOpen,
   Building2,
   ClipboardList,
-  DatabaseZap,
   KanbanSquare,
   LayoutDashboard,
   Map as MapIcon,
@@ -15,6 +14,7 @@ import {
   MessageCircle,
   Settings2,
   Users,
+  Workflow,
   X,
   Zap,
 } from "lucide-react";
@@ -26,7 +26,7 @@ const ICONS = {
   dashboard: LayoutDashboard,
   broker: ClipboardList,
   pipeline: KanbanSquare,
-  ingestion: DatabaseZap,
+  cowork: Workflow,
   properties: Building2,
   market: MapIcon,
   automations: Zap,
@@ -46,7 +46,7 @@ function isActive(pathname: string, item: NavigationItem) {
 function SidebarNav({ items, pathname, onNavigate }: { items: NavigationItem[]; pathname: string; onNavigate?: () => void }) {
   const groups = [
     { label: "Workspace", keys: ["/dashboard", "/broker", "/broker/pipeline", "/properties", "/market"] },
-    { label: "Data", keys: ["/admin/ingestion", "/automations"] },
+    { label: "Operations", keys: ["/cowork", "/automations"] },
     { label: "Settings", keys: ["/configure", "/members", "/docs"] },
   ];
   return (
