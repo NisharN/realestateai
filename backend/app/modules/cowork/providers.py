@@ -37,6 +37,7 @@ Capability = Literal[
     "create_event",
     "notify",
     "llm",
+    "score_leads",
 ]
 
 
@@ -287,6 +288,22 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         test_method="http_ping",
     ),
     # ---- AI / data ----------------------------------------------------------
+    ProviderSpec(
+        "typesafe_jev",
+        "TypeSafe AI · Jev",
+        "ai",
+        "System One model that returns typed, calibrated decisions (band, readiness, intent, financing) instead of text. Used for lead scoring and qualification.",
+        "api_key",
+        ("score_leads",),
+        (
+            _API_KEY,
+            ConfigField("model", "Model", required=False, placeholder="jev-latest"),
+            ConfigField("base_url", "API base URL", required=False, placeholder="https://api.typesafe.ai"),
+        ),
+        docs_url="https://typesafe.ai",
+        test_method="jev_ping",
+        tags=("scoring", "qualification", "calibrated"),
+    ),
     ProviderSpec(
         "llm",
         "LLM gateway",

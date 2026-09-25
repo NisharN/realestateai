@@ -1,6 +1,5 @@
 """Application configuration and settings."""
 from functools import lru_cache
-from typing import List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -53,6 +52,13 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""
     SUPABASE_INVITE_REDIRECT_URL: str = "http://localhost:3000/auth/callback"
     CORS_ORIGINS: str = "http://localhost:3000"
+
+    # TypeSafe AI Jev (System One model) for lead scoring / qualification
+    TYPESAFE_API_KEY: str = ""
+    TYPESAFE_BASE_URL: str = "https://api.typesafe.ai"
+    JEV_MODEL: str = "jev-latest"
+    LEAD_SCORING_PROVIDER: str = "auto"          # auto | jev | rules  (auto = jev when key set)
+    JEV_MIN_CONFIDENCE: float = 0.55             # below this the deterministic band is kept
 
     # Groq LLM (Free tier: 30 RPM, 6K TPM, 1K RPD for most models)
     GROQ_API_KEY: str = ""
@@ -121,20 +127,20 @@ class Settings(BaseSettings):
     HUGGING_FACE_STT_MODEL: str = "openai/whisper-large-v3-turbo"
 
     # WhatsApp Business API
-    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
-    WHATSAPP_ACCESS_TOKEN: Optional[str] = None
-    WHATSAPP_VERIFY_TOKEN: Optional[str] = "dubai-real-estate-webhook"
+    WHATSAPP_PHONE_NUMBER_ID: str | None = None
+    WHATSAPP_ACCESS_TOKEN: str | None = None
+    WHATSAPP_VERIFY_TOKEN: str | None = "dubai-real-estate-webhook"
     META_APP_SECRET: str = ""
 
     # Cloudinary
-    CLOUDINARY_CLOUD_NAME: Optional[str] = None
-    CLOUDINARY_API_KEY: Optional[str] = None
-    CLOUDINARY_API_SECRET: Optional[str] = None
+    CLOUDINARY_CLOUD_NAME: str | None = None
+    CLOUDINARY_API_KEY: str | None = None
+    CLOUDINARY_API_SECRET: str | None = None
 
     # Licensed property sources (no portal scraping — BRD §1.4)
-    APPROVED_FEED_URL: Optional[str] = None
-    APPROVED_FEED_TOKEN: Optional[str] = None
-    RAPIDAPI_UAE_REAL_ESTATE_KEY: Optional[str] = None
+    APPROVED_FEED_URL: str | None = None
+    APPROVED_FEED_TOKEN: str | None = None
+    RAPIDAPI_UAE_REAL_ESTATE_KEY: str | None = None
     RAPIDAPI_UAE_REAL_ESTATE_HOST: str = "uae-real-estate3.p.rapidapi.com"
 
     # Voice (Piper TTS)
@@ -178,11 +184,11 @@ class Settings(BaseSettings):
         return self.SUPABASE_SERVICE_KEY or self.SUPABASE_KEY
 
     @property
-    def llm_providers(self) -> List[str]:
+    def llm_providers(self) -> list[str]:
         return [p.strip().lower() for p in self.LLM_PROVIDERS.split(",") if p.strip()]
 
     @property
-    def cors_origins(self) -> List[str]:
+    def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     @property
@@ -209,6 +215,6 @@ class Settings(BaseSettings):
         return mode
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     return Settings()

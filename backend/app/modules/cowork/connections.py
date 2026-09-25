@@ -307,6 +307,13 @@ async def test_connection(workspace_id: str, connection_id: str) -> dict[str, An
         await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
         return {"status": "ok" if ok else "failed", "detail": detail}
 
+    if spec.test_method == "jev_ping":
+        from app.modules.llm import jev
+
+        ok, detail = await jev.ping(api_key=cfg.get("api_key"), base_url=cfg.get("base_url") or None)
+        await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
+        return {"status": "ok" if ok else "failed", "detail": detail}
+
     if spec.test_method == "webhook":
         detail = "Inbound webhook ready — send a signed test from the Webhook panel"
         await _record_test(workspace_id, connection_id, "ok", detail)

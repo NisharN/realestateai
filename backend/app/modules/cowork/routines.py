@@ -58,7 +58,7 @@ STEP_TYPES: dict[str, dict[str, Any]] = {
     "leads.select": {"label": "Select leads", "group": "data", "needs_connection": False, "params": ["stage", "band", "min_score", "stale_hours", "created_within_hours", "limit"]},
     "viewings.select": {"label": "Select upcoming viewings", "group": "data", "needs_connection": False, "params": ["within_hours", "limit"]},
     "listings.validate": {"label": "Validate listings (permit, price, photos)", "group": "data", "needs_connection": False, "params": ["limit"]},
-    "llm.qualify": {"label": "AI qualify & score selected leads", "group": "llm", "needs_connection": False, "params": []},
+    "llm.qualify": {"label": "Qualify & score selected leads (Jev)", "group": "llm", "needs_connection": False, "capability": "score_leads", "params": []},
     "llm.summarize": {"label": "AI summary of this run", "group": "llm", "needs_connection": False, "params": ["focus"]},
     "llm.draft_message": {"label": "AI draft follow-up per lead", "group": "llm", "needs_connection": False, "params": ["channel", "tone", "language"]},
     "tasks.create": {"label": "Create broker tasks for selected leads", "group": "data", "needs_connection": False, "params": ["title", "due_in_hours"]},
@@ -118,7 +118,7 @@ async def validate_steps(workspace_id: str, steps: list[Step]) -> list[dict[str,
     out: list[dict[str, Any]] = []
     for i, step in enumerate(steps):
         meta = STEP_TYPES[step.type]
-        if meta["needs_connection"] and step.connection_id:
+        if meta.get("capability") and step.connection_id:
             row = await conn.get_connection(workspace_id, step.connection_id)
             if not row:
                 raise ValueError(f"step {i + 1}: connection not found")
@@ -391,12 +391,47 @@ def _lead_brief(lead: Row) -> str:
     return "; ".join(f"{k}={lead.get(k)}" for k in keys if lead.get(k) not in (None, "", []))[:800]
 
 
-async def _llm_qualify(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
-    from app.modules.llm import LLMUnavailable, get_gateway
+def _lead_state(lead: Row) -> dict[str, Any]:
+    keys = ("purpose", "budget_max_aed", "budget_min_aed", "timeline", "payment", "area_preference", "property_type", "bedrooms", "score", "band", "stage", "source", "language", "message", "last_message")
+    return {k: lead.get(k) for k in keys if lead.get(k) not in (None, "", [])}
+
+
+async def _jev_credentials(ctx: RunContext, connection_id: str | None) -> dict[str, Any] | None:
+    """Jev credentials from the step's connection, else the workspace-wide env key; None when neither."""
+    from app.modules.llm import jev
+
+    if connection_id:
+        row = await conn.get_connection(ctx.workspace_id, connection_id)
+        if row and row.get("provider") == "typesafe_jev" and row.get("status") == "active":
+            cfg = dict(row.get("config") or {})
+            if cfg.get("api_key"):
+                return {"api_key": cfg["api_key"], "model": cfg.get("model") or None, "base_url": cfg.get("base_url") or None}
+    return {} if jev.configured() else None
+
+
+async def _llm_qualify(ctx: RunContext, params: dict[str, Any], *, connection_id: str | None = None) -> dict[str, Any]:
+    from app.modules.llm import LLMUnavailable, get_gateway, jev
+
+    creds = await _jev_credentials(ctx, connection_id)
+    jev_used = 0
+    jev_error: str | None = None
+    if creds is not None:
+        for lead in ctx.leads[:MAX_LEADS]:
+            try:
+                q = await jev.qualify(_lead_state(lead), **creds)
+            except jev.JevUnavailable as exc:
+                jev_error = str(exc)
+                break
+            ctx.qualifications[lead["id"]] = {"band": q.band, "score": q.score, "intent": q.intent, "reasons": q.reasons, "confidence": q.band_confidence, "needs_human": q.needs_human, "source": "jev", "model": q.model}
+            jev_used += 1
+        if jev_used == len(ctx.leads[:MAX_LEADS]):
+            return {"qualified": jev_used, "jev": jev_used, "llm": 0, "rules": 0, "provider": "typesafe_jev", "simulated": False}
 
     gw = get_gateway()
     llm_used = 0
     for lead in ctx.leads[:MAX_LEADS]:
+        if lead["id"] in ctx.qualifications:
+            continue
         result: dict[str, Any] | None = None
         if gw.available:
             try:
@@ -413,7 +448,18 @@ async def _llm_qualify(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any
             except LLMUnavailable:
                 result = None
         ctx.qualifications[lead["id"]] = result or _rule_qualify(lead)
-    return {"qualified": len(ctx.qualifications), "llm": llm_used, "rules": len(ctx.qualifications) - llm_used, "simulated": llm_used == 0 and bool(ctx.leads)}
+    out: dict[str, Any] = {
+        "qualified": len(ctx.qualifications),
+        "jev": jev_used,
+        "llm": llm_used,
+        "rules": len(ctx.qualifications) - llm_used - jev_used,
+        "simulated": jev_used == 0 and llm_used == 0 and bool(ctx.leads),
+    }
+    if jev_error:
+        out["jev_error"] = jev_error
+    elif creds is None:
+        out["reason"] = "Jev not configured — connect TypeSafe AI or set TYPESAFE_API_KEY"
+    return out
 
 
 async def _llm_summarize(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -603,7 +649,7 @@ async def _execute_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, Any]
     if t == "listings.validate":
         return await _validate_listings(ctx, params)
     if t == "llm.qualify":
-        return await _llm_qualify(ctx, params)
+        return await _llm_qualify(ctx, params, connection_id=step.get("connection_id"))
     if t == "llm.summarize":
         return await _llm_summarize(ctx, params)
     if t == "llm.draft_message":
@@ -721,7 +767,7 @@ TEMPLATES: list[dict[str, Any]] = [
         "steps": [
             {"type": "connector.pull_leads", "provider": "property_finder"},
             {"type": "leads.select", "params": {"created_within_hours": 2, "limit": 100}},
-            {"type": "llm.qualify"},
+            {"type": "llm.qualify", "provider": "typesafe_jev"},
             {"type": "connector.push_leads", "provider": "realestate_crm"},
             {"type": "leads.select", "params": {"created_within_hours": 2, "band": "hot", "limit": 50}},
             {"type": "tasks.create", "params": {"title": "Call new hot lead {first_name}", "due_in_hours": 2}},
@@ -760,7 +806,7 @@ TEMPLATES: list[dict[str, Any]] = [
         "schedule": {"kind": "daily", "at": "08:00", "tz": "Asia/Dubai"},
         "steps": [
             {"type": "leads.select", "params": {"band": "hot", "limit": 50}},
-            {"type": "llm.qualify"},
+            {"type": "llm.qualify", "provider": "typesafe_jev"},
             {"type": "llm.summarize", "params": {"focus": "which hot leads to call first and why"}},
             {"type": "connector.send_email", "provider": "gmail", "params": {"subject": "Hot leads — today"}},
         ],

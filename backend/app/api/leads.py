@@ -81,8 +81,8 @@ async def ingest_lead(
 
         repo = ConversationRepo(context.workspace_id)
         state = await repo.load(lead_id, channel="chat", source=request.source)
-        state.score, state.score_reasons = scorer.score(state)
-        state.band = scorer.band_for(state.score)
+        qual = await scorer.qualify(state, recent_messages=[request.message] if request.message else None)
+        state.score, state.score_reasons, state.band = qual.score, qual.reasons, qual.band  # type: ignore[assignment]
         await repo.save(state)
 
         reply = ""
