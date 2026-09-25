@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from app.modules.store import Row, new_id, now_iso, table
+from app.modules.store import Row, chunked, new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,8 @@ async def _poll_connectors(workspace_id: str) -> dict[str, Any]:
         result = await poll_connector(connector["id"], workspace_id=workspace_id)
         ids = result.get("raw_ids", [])
         landed += len(ids)
-        processed += len(await process_many(ids[:500], workspace_id=workspace_id))
+        for batch in chunked(ids, PROCESS_BATCH):
+            processed += len(await process_many(batch, workspace_id=workspace_id))
     return {"connectors": len(connectors), "landed": landed, "processed": processed}
 
 
@@ -106,6 +107,9 @@ JOB_INDEX: dict[str, JobSpec] = {j.id: j for j in JOBS}
 
 SETTINGS_TABLE = "cowork_job_settings"
 RUNS_TABLE = "cowork_job_runs"
+LEASES_TABLE = "cowork_job_leases"
+PROCESS_BATCH = 500
+LEASE_S = 600
 
 
 def get_spec(job_id: str) -> JobSpec:
@@ -188,9 +192,52 @@ async def is_due(workspace_id: str, job_id: str, now: datetime | None = None) ->
     return datetime.fromisoformat(last[0]["started_at"]) + timedelta(seconds=job["interval_s"]) <= now
 
 
+async def acquire_lease(workspace_id: str, job_id: str, holder: str, *, now: datetime | None = None) -> bool:
+    """Atomic per-workspace/job execution lease.
+
+    One row per (workspace, job); a conditional UPDATE on ``lease_until <= now``
+    is a single-row compare-and-set in Postgres, and the unique index makes the
+    first INSERT the only winner when no row exists yet. Anyone who does not
+    get a row back must not run the job.
+    """
+    leases = table(LEASES_TABLE, workspace_id)
+    now = now or datetime.now(timezone.utc)
+    until = (now + timedelta(seconds=LEASE_S)).isoformat()
+    updates = {"holder": holder, "lease_until": until, "updated_at": now.isoformat()}
+    if await leases.update(updates, job_id=job_id, lease_until__lte=now.isoformat()):
+        return True
+    if await leases.get(job_id=job_id):
+        return False
+    try:
+        await leases.insert({"id": new_id(), "job_id": job_id, **updates})
+    except Exception as exc:  # unique violation: someone else inserted first
+        logger.info("lease for %s/%s taken concurrently: %s", workspace_id, job_id, exc)
+        return False
+    return True
+
+
+async def release_lease(workspace_id: str, job_id: str, holder: str) -> None:
+    await table(LEASES_TABLE, workspace_id).update({"lease_until": now_iso(), "updated_at": now_iso()}, job_id=job_id, holder=holder)
+
+
 async def run_job(workspace_id: str, job_id: str, *, trigger: Trigger = "manual", actor: str | None = None) -> Row:
-    """Execute a job once and record the outcome. Never raises for job failures."""
+    """Execute a job once and record the outcome. Never raises for job failures.
+
+    Returns an unpersisted ``skipped`` row when another worker holds the lease.
+    """
     spec = get_spec(job_id)
+    holder = new_id()
+    if not await acquire_lease(workspace_id, job_id, holder):
+        return {"id": None, "job_id": job_id, "trigger": trigger, "actor": actor, "status": "skipped", "error": "already running", "summary": {}}
+    try:
+        if trigger == "schedule" and not await is_due(workspace_id, job_id):
+            return {"id": None, "job_id": job_id, "trigger": trigger, "actor": actor, "status": "skipped", "error": "not due", "summary": {}}
+        return await _run_locked(spec, workspace_id, job_id, trigger=trigger, actor=actor)
+    finally:
+        await release_lease(workspace_id, job_id, holder)
+
+
+async def _run_locked(spec: JobSpec, workspace_id: str, job_id: str, *, trigger: Trigger, actor: str | None) -> Row:
     runs = table(RUNS_TABLE, workspace_id)
     started = time.monotonic()
     row: Row = {

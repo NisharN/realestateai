@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import RequestContext, WorkspaceRole, get_request_context
 from app.modules.cowork import automations, integrations, jobs
+from app.modules.leads.stages import PIPELINE_STAGES
 from app.modules.store import table
 
 router = APIRouter()
@@ -95,7 +96,8 @@ async def automation_catalog(context: RequestContext = Depends(get_request_conte
         "actions": automations.ACTIONS,
         "condition_fields": list(automations.CONDITION_FIELDS),
         "operators": ["eq", "ne", "gte", "lte", "in", "contains", "exists"],
-        "jobs": [{"id": j.id, "label": j.label} for j in jobs.JOBS],
+        "jobs": [{"id": j.id, "label": j.label} for j in jobs.JOBS if j.id not in automations.FORBIDDEN_JOBS],
+        "stages": list(PIPELINE_STAGES),
     }
 
 
@@ -108,15 +110,16 @@ async def list_automations(context: RequestContext = Depends(get_request_context
 @router.post("/automations", status_code=201)
 async def create_automation(body: automations.AutomationIn, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _admin(context)
-    if body.action == "run_job" and str(body.action_params.get("job_id") or "") not in jobs.JOB_INDEX:
-        raise HTTPException(status_code=422, detail="unknown_job")
     return await automations.create_rule(context.workspace_id, body, actor=context.user_id)
 
 
 @router.patch("/automations/{rule_id}")
 async def patch_automation(rule_id: str, body: automations.AutomationPatch, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     _admin(context)
-    row = await automations.patch_rule(context.workspace_id, rule_id, body)
+    try:
+        row = await automations.patch_rule(context.workspace_id, rule_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
     return row

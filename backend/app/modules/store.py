@@ -12,7 +12,7 @@ import uuid
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Iterable, Protocol
+from typing import Any, Iterable, Protocol, TypeVar
 
 from app.config import get_settings
 from app.database import DatabaseClient, current_workspace_id
@@ -264,8 +264,11 @@ def lock_for(key: str) -> asyncio.Lock:
     return _LOCKS[key]
 
 
-def chunked(items: Iterable[Row], size: int) -> Iterable[list[Row]]:
-    batch: list[Row] = []
+T = TypeVar("T")
+
+
+def chunked(items: Iterable[T], size: int) -> Iterable[list[T]]:
+    batch: list[T] = []
     for item in items:
         batch.append(item)
         if len(batch) >= size:

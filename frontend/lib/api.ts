@@ -1097,6 +1097,7 @@ export interface AutomationCatalog {
   condition_fields: string[];
   operators: AutomationCondition["op"][];
   jobs: { id: string; label: string }[];
+  stages: string[];
 }
 
 export interface AutomationRun {
