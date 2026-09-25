@@ -64,3 +64,31 @@ async def test_mock_repository_scale_queries(scaled):
 async def test_scale_load_is_idempotent(scaled):
     again = load_scale_data(1000, _MEMORY)
     assert again == scaled
+
+
+@pytest.mark.asyncio
+async def test_buy_search_never_returns_rental_stock(scaled):
+    from app.modules.tools.property_search import PropertyQuery, search
+
+    result = await search(
+        PropertyQuery(purpose="buy", max_price=2_500_000 * 1.1, min_price=2_500_000 * 0.6, limit=5),
+        get_settings().WORKSPACE_ID,
+    )
+    assert result.cards
+    assert all(c.price and c.price >= 1_500_000 for c in result.cards)
+    listed = {_properties[c.property_id].get("listing_type") for c in result.cards}
+    assert listed <= {"sale", None}
+
+    rent = await search(PropertyQuery(purpose="rent", max_price=150_000 * 1.1, limit=5), get_settings().WORKSPACE_ID)
+    assert rent.cards and all(_properties[c.property_id].get("listing_type") in ("rent", None) for c in rent.cards)
+
+
+def test_scale_handoff_briefs_are_populated():
+    from app.demo_scale import scale_leads, scale_related
+
+    related = scale_related(list(scale_leads(500)))
+    briefs = [h["brief"] for h in related["handoffs"]]
+    assert briefs
+    for brief in briefs:
+        assert brief["headline"] and brief["next_step"] and brief["summary"]
+        assert len(brief["score_reasons"]) >= 3

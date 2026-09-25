@@ -23,7 +23,7 @@ import {
 // Leaflet touches `window` on import, so the map can't be server-rendered.
 const CompsMap = dynamic(
   () => import("./_comps-map").then((m) => m.CompsMap),
-  { ssr: false, loading: () => <div className="h-full w-full bg-gray-100 animate-pulse rounded-2xl" /> }
+  { ssr: false, loading: () => <div className="h-full w-full bg-muted animate-pulse rounded-2xl" /> }
 );
 
 export default function MarketPage() {
@@ -64,19 +64,19 @@ export default function MarketPage() {
   );
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-gray-50 p-6">
+    <div className="min-h-[calc(100vh-3.5rem)] bg-muted/50 p-6">
       <div className="max-w-7xl mx-auto">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Market comps</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-foreground">Market comps</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             Recent comparable transactions across Dubai communities.
           </p>
         </header>
 
         {meta?.isDemo && (
-          <div className="mb-4 flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+          <div className="mb-4 flex items-start gap-2 px-4 py-3 rounded-xl bg-warning-soft border border-warning/20">
             <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-amber-800">
+            <p className="text-sm text-warning">
               <span className="font-medium">Demo data.</span> {meta.source}. Set{" "}
               <code className="px-1 py-0.5 bg-amber-100 rounded text-xs">DATA_MODE_DLD=live</code>{" "}
               to pull real Dubai Land Department transactions from Dubai Pulse.
@@ -85,23 +85,23 @@ export default function MarketPage() {
         )}
 
         {error && (
-          <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+          <div className="mb-4 px-4 py-3 rounded-xl bg-danger-soft border border-danger/20 text-sm text-danger">
             {error}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <MapPin className="w-4 h-4 text-gray-400" />
+            <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
+              <div className="p-4 border-b border-border flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <MapPin className="w-4 h-4 text-muted-foreground/70" />
                   {loading ? "Loading…" : `${visible.length.toLocaleString()} transactions`}
                 </div>
                 <select
                   value={selectedArea ?? ""}
                   onChange={(e) => setSelectedArea(e.target.value || null)}
-                  className="px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none"
+                  className="px-3 py-2 bg-muted rounded-xl text-sm focus:outline-none"
                 >
                   <option value="">All communities</option>
                   {communities.map((c) => (
@@ -118,7 +118,7 @@ export default function MarketPage() {
                   selectedArea={selectedArea}
                 />
               </div>
-              <div className="px-4 pb-4 flex items-center gap-3 text-xs text-gray-500">
+              <div className="px-4 pb-4 flex items-center gap-3 text-xs text-muted-foreground">
                 <span>Lower AED/sqft</span>
                 <div className="h-2 flex-1 rounded-full bg-gradient-to-r from-teal-500 via-amber-500 to-rose-500" />
                 <span>Higher AED/sqft</span>
@@ -162,15 +162,15 @@ function PriceChecker({ communities }: { communities: Community[] }) {
 
   const verdictStyle: Record<string, { label: string; cls: string; Icon: typeof TrendingUp }> = {
     below_market: { label: "Below market", cls: "text-teal-700 bg-teal-50 border-teal-200", Icon: TrendingDown },
-    in_line: { label: "In line with market", cls: "text-gray-700 bg-gray-50 border-gray-200", Icon: Minus },
+    in_line: { label: "In line with market", cls: "text-foreground/80 bg-muted/50 border-border", Icon: Minus },
     above_market: { label: "Above market", cls: "text-rose-700 bg-rose-50 border-rose-200", Icon: TrendingUp },
-    no_comparable_data: { label: "No comparable data", cls: "text-gray-600 bg-gray-50 border-gray-200", Icon: Info },
+    no_comparable_data: { label: "No comparable data", cls: "text-muted-foreground bg-muted/50 border-border", Icon: Info },
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-1">Price positioning</h2>
-      <p className="text-xs text-gray-500 mb-4">
+    <div className="bg-card rounded-2xl border border-border shadow-card p-6">
+      <h2 className="text-lg font-semibold text-foreground mb-1">Price positioning</h2>
+      <p className="text-xs text-muted-foreground mb-4">
         Compare an asking price against recent comparable sales.
       </p>
 
@@ -178,7 +178,7 @@ function PriceChecker({ communities }: { communities: Community[] }) {
         <select
           value={area}
           onChange={(e) => setArea(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none"
+          className="w-full px-3 py-2 bg-muted rounded-xl text-sm focus:outline-none"
         >
           {communities.map((c) => (
             <option key={c.name} value={c.name}>
@@ -192,7 +192,7 @@ function PriceChecker({ communities }: { communities: Community[] }) {
           placeholder="Asking price (AED)"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none"
+          className="w-full px-3 py-2 bg-muted rounded-xl text-sm focus:outline-none"
         />
         <input
           type="number"
@@ -200,12 +200,12 @@ function PriceChecker({ communities }: { communities: Community[] }) {
           placeholder="Size (sqft) — for like-for-like"
           value={size}
           onChange={(e) => setSize(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none"
+          className="w-full px-3 py-2 bg-muted rounded-xl text-sm focus:outline-none"
         />
         <button
           onClick={check}
           disabled={checking || !price}
-          className="w-full px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-40"
+          className="w-full px-4 py-2.5 bg-brand text-white rounded-xl text-sm font-medium hover:bg-brand-2 transition disabled:opacity-40"
         >
           {checking ? "Checking…" : "Check price"}
         </button>
@@ -215,7 +215,7 @@ function PriceChecker({ communities }: { communities: Community[] }) {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-5 pt-5 border-t border-gray-100"
+          className="mt-5 pt-5 border-t border-border"
         >
           {(() => {
             const style = verdictStyle[result.verdict] ?? verdictStyle.no_comparable_data;
@@ -253,7 +253,7 @@ function PriceChecker({ communities }: { communities: Community[] }) {
           </dl>
 
           {result.caveat && (
-            <p className="mt-3 text-xs text-gray-500">{result.caveat}</p>
+            <p className="mt-3 text-xs text-muted-foreground">{result.caveat}</p>
           )}
         </motion.div>
       )}
@@ -264,8 +264,8 @@ function PriceChecker({ communities }: { communities: Community[] }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="text-gray-900 font-medium">{value}</dd>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-foreground font-medium">{value}</dd>
     </div>
   );
 }
@@ -282,19 +282,19 @@ function CommunityTable({
   );
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-900">Median AED/sqft</h2>
+    <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
+      <div className="p-4 border-b border-border">
+        <h2 className="text-sm font-semibold text-foreground">Median AED/sqft</h2>
       </div>
-      <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+      <div className="divide-y divide-border/60 max-h-80 overflow-y-auto">
         {sorted.map((c) => (
           <button
             key={c.name}
             onClick={() => onSelect(c.name)}
-            className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition text-left"
+            className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/50 transition text-left"
           >
-            <span className="text-sm text-gray-700">{c.name}</span>
-            <span className="text-sm font-medium text-gray-900">
+            <span className="text-sm text-foreground/80">{c.name}</span>
+            <span className="text-sm font-medium text-foreground">
               {c.median_price_per_sqft
                 ? Math.round(c.median_price_per_sqft).toLocaleString()
                 : "—"}

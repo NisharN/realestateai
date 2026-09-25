@@ -94,17 +94,17 @@ function StepProgress({ step }: { step: number }) {
             key={label}
             className={
               "text-xs font-medium flex items-center gap-1.5 " +
-              (i <= step ? "text-blue-700" : "text-gray-400")
+              (i <= step ? "text-brand" : "text-muted-foreground/70")
             }
           >
             <span
               className={
                 "w-5 h-5 rounded-full flex items-center justify-center text-[10px] " +
                 (i < step
-                  ? "bg-blue-600 text-white"
+                  ? "bg-brand text-white"
                   : i === step
-                  ? "bg-blue-100 text-blue-700 border border-blue-400"
-                  : "bg-gray-100 text-gray-400")
+                  ? "bg-brand/10 text-brand border border-blue-400"
+                  : "bg-muted text-muted-foreground/70")
               }
             >
               {i < step ? <Check className="w-3 h-3" /> : i + 1}
@@ -113,9 +113,9 @@ function StepProgress({ step }: { step: number }) {
           </div>
         ))}
       </div>
-      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
         <motion.div
-          className="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full"
+          className="h-full bg-gradient-to-r from-brand to-brand-2 rounded-full"
           initial={false}
           animate={{ width: `${(step / (STEPS.length - 1)) * 100}%` }}
           transition={{ type: "spring", stiffness: 200, damping: 30 }}
@@ -159,23 +159,23 @@ function TeamStep({
   return (
     <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+        <label className="block text-sm font-medium text-foreground/80 mb-1">
           Workspace name
         </label>
         <input
           value={workspaceName}
           onChange={(e) => setWorkspaceName(e.target.value)}
           placeholder="e.g. Golden Sands Realty"
-          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/20"
         />
-        <p className="text-xs text-gray-400 mt-1">
+        <p className="text-xs text-muted-foreground/70 mt-1">
           This becomes the name of the broker/agency instance you're configuring.
         </p>
       </div>
 
-      <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
-        <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800">
-          <Users className="w-4 h-4 text-blue-600" />
+      <div className="bg-muted/50 rounded-2xl p-5 border border-border">
+        <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-foreground">
+          <Users className="w-4 h-4 text-brand" />
           Team roster
         </div>
 
@@ -187,20 +187,20 @@ function TeamStep({
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex items-center justify-between bg-white rounded-xl border border-gray-100 px-4 py-2.5 mb-2"
+              className="flex items-center justify-between bg-card rounded-xl border border-border px-4 py-2.5 mb-2"
             >
               <div>
-                <p className="text-sm font-medium text-gray-900">
-                  {m.name} <span className="text-gray-400 font-normal">— {m.role}</span>
+                <p className="text-sm font-medium text-foreground">
+                  {m.name} <span className="text-muted-foreground/70 font-normal">— {m.role}</span>
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   {m.languages.join(", ")}
                   {m.specialization.length > 0 && ` · ${m.specialization.join(", ")}`}
                 </p>
               </div>
               <button
                 onClick={() => removeMember(i)}
-                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                className="p-1.5 text-muted-foreground/70 hover:text-red-500 hover:bg-danger-soft rounded-lg transition"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -213,12 +213,12 @@ function TeamStep({
             placeholder="Name"
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            className="col-span-2 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="col-span-2 px-3 py-2 text-sm border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-brand/20"
           />
           <select
             value={draft.role}
             onChange={(e) => setDraft({ ...draft, role: e.target.value as TeamMember["role"] })}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
+            className="px-3 py-2 text-sm border border-border rounded-lg bg-card focus:outline-none"
           >
             <option value="agent">Agent</option>
             <option value="broker">Broker</option>
@@ -233,7 +233,7 @@ function TeamStep({
                 languages: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
               })
             }
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="px-3 py-2 text-sm border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-brand/20"
           />
           <input
             placeholder="Areas (comma-sep)"
@@ -244,13 +244,13 @@ function TeamStep({
                 specialization: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
               })
             }
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="px-3 py-2 text-sm border border-border rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-brand/20"
           />
         </div>
         <button
           onClick={addMember}
           disabled={!draft.name.trim()}
-          className="mt-3 flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-3 flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-brand bg-brand/5 hover:bg-brand/10 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-3.5 h-3.5" /> Add to roster
         </button>
@@ -338,7 +338,7 @@ function PipelineStep({
     <div>
       <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
 
-      <p className="text-sm text-gray-500 mb-5">
+      <p className="text-sm text-muted-foreground mb-5">
         Turn on the sources this workspace uses to build its property inventory. Bayut and
         Dubizzle live scraping are deferred by default (both are anti-bot protected) — lead
         with CSV/CRM import, an approved feed, or RapidAPI instead.
@@ -357,8 +357,8 @@ function PipelineStep({
               className={
                 "text-left p-4 rounded-2xl border transition relative overflow-hidden " +
                 (s.enabled
-                  ? "border-blue-300 bg-blue-50/60"
-                  : "border-gray-200 bg-white hover:border-gray-300")
+                  ? "border-blue-300 bg-brand/5/60"
+                  : "border-border border-border bg-card hover:border-border")
               }
             >
               <div className="flex items-start justify-between">
@@ -366,20 +366,20 @@ function PipelineStep({
                   <div
                     className={
                       "w-9 h-9 rounded-xl flex items-center justify-center " +
-                      (s.enabled ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-500")
+                      (s.enabled ? "bg-brand text-white" : "bg-muted text-muted-foreground")
                     }
                   >
                     <Icon className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{meta.label}</p>
-                    <p className="text-xs text-gray-500">{meta.description}</p>
+                    <p className="text-sm font-medium text-foreground">{meta.label}</p>
+                    <p className="text-xs text-muted-foreground">{meta.description}</p>
                   </div>
                 </div>
                 {isBusy ? (
                   <Loader2 className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
                 ) : s.enabled ? (
-                  <Check className="w-4 h-4 text-blue-600 shrink-0" />
+                  <Check className="w-4 h-4 text-brand shrink-0" />
                 ) : null}
               </div>
             </motion.button>
@@ -388,8 +388,8 @@ function PipelineStep({
       </div>
 
       {/* Animated pipeline visualization */}
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-6">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+      <div className="bg-muted/50 rounded-2xl border border-border p-6">
+        <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-4">
           Pipeline preview
         </p>
         <div className="flex items-center gap-3 overflow-x-auto pb-2">
@@ -402,7 +402,7 @@ function PipelineStep({
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex items-center gap-3 shrink-0"
               >
-                <div className="px-3 py-2 bg-white border border-blue-200 rounded-xl text-xs font-medium text-blue-700 whitespace-nowrap">
+                <div className="px-3 py-2 bg-card border border-blue-200 rounded-xl text-xs font-medium text-brand whitespace-nowrap">
                   {SOURCE_META[s.source].label}
                 </div>
                 <motion.div
@@ -413,12 +413,12 @@ function PipelineStep({
                 />
               </motion.div>
             ))}
-          <div className="px-4 py-2.5 bg-gradient-to-br from-blue-600 to-purple-600 text-white rounded-xl text-xs font-semibold whitespace-nowrap shrink-0">
+          <div className="px-4 py-2.5 bg-gradient-to-br from-brand to-brand-2 text-white rounded-xl text-xs font-semibold whitespace-nowrap shrink-0">
             Unified property inventory
           </div>
         </div>
         {enabledCount === 0 && (
-          <p className="text-xs text-gray-400 mt-3">
+          <p className="text-xs text-muted-foreground/70 mt-3">
             Turn on at least one source above to see it flow into inventory.
           </p>
         )}
@@ -430,7 +430,7 @@ function PipelineStep({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="mt-4 text-xs px-3 py-2 bg-gray-900 text-white rounded-lg inline-block"
+            className="mt-4 text-xs px-3 py-2 bg-brand text-white rounded-lg inline-block"
           >
             {toast}
           </motion.div>
@@ -461,16 +461,16 @@ function ChannelsStep({
 
   return (
     <div className="space-y-6">
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-800">
-          <MessageCircle className="w-4 h-4 text-green-600" />
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-foreground">
+          <MessageCircle className="w-4 h-4 text-success" />
           WhatsApp number
         </div>
         <input
           value={channels.whatsapp_number || ""}
           onChange={(e) => setChannels({ ...channels, whatsapp_number: e.target.value })}
           placeholder="+971 5X XXX XXXX"
-          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/20"
         />
         <p className="text-xs text-amber-600 mt-2">
           POC note: this stores the number for the workspace config. No real WhatsApp message
@@ -478,9 +478,9 @@ function ChannelsStep({
         </p>
       </div>
 
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-800">
-          <Globe2 className="w-4 h-4 text-blue-600" />
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-foreground">
+          <Globe2 className="w-4 h-4 text-brand" />
           Languages
         </div>
         <div className="flex gap-2">
@@ -491,8 +491,8 @@ function ChannelsStep({
               className={
                 "px-4 py-2 rounded-xl text-sm font-medium border transition " +
                 (channels.languages.includes(lang)
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300")
+                  ? "bg-brand text-white border-blue-600"
+                  : "bg-card text-muted-foreground border-border hover:border-border")
               }
             >
               {lang === "en" ? "English" : "العربية"}
@@ -501,10 +501,10 @@ function ChannelsStep({
         </div>
       </div>
 
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5 flex items-center justify-between">
+      <div className="bg-muted/50 rounded-2xl border border-border p-5 flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-gray-800">Web chat widget</p>
-          <p className="text-xs text-gray-500">The chat UI you're using right now.</p>
+          <p className="text-sm font-semibold text-foreground">Web chat widget</p>
+          <p className="text-xs text-muted-foreground">The chat UI you're using right now.</p>
         </div>
         <button
           onClick={() =>
@@ -512,11 +512,11 @@ function ChannelsStep({
           }
           className={
             "w-11 h-6 rounded-full relative transition-colors " +
-            (channels.web_widget_enabled ? "bg-blue-600" : "bg-gray-300")
+            (channels.web_widget_enabled ? "bg-brand" : "bg-gray-300")
           }
         >
           <motion.div
-            className="w-5 h-5 bg-white rounded-full absolute top-0.5"
+            className="w-5 h-5 bg-card rounded-full absolute top-0.5"
             animate={{ left: channels.web_widget_enabled ? 22 : 2 }}
             transition={{ type: "spring", stiffness: 500, damping: 30 }}
           />
@@ -558,13 +558,13 @@ function ReviewStep({
           transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.1 }}
           className="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center"
         >
-          <PartyPopper className="w-8 h-8 text-green-600" />
+          <PartyPopper className="w-8 h-8 text-success" />
         </motion.div>
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="text-lg font-semibold text-foreground">
           {workspaceName || "Your workspace"} is live
         </h3>
-        <p className="text-sm text-gray-500 mt-1">Workspace ID: {launched}</p>
-        <p className="text-xs text-gray-400 mt-4 max-w-sm mx-auto">
+        <p className="text-sm text-muted-foreground mt-1">Workspace ID: {launched}</p>
+        <p className="text-xs text-muted-foreground/70 mt-4 max-w-sm mx-auto">
           Leads coming through Chat now route through this configuration. Remember: this is a
           POC — leads/properties aren't scoped per-workspace yet (see Docs).
         </p>
@@ -574,21 +574,21 @@ function ReviewStep({
 
   return (
     <div className="space-y-4">
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2">
           Workspace
         </p>
-        <p className="text-sm font-medium text-gray-900">{workspaceName || "(untitled)"}</p>
+        <p className="text-sm font-medium text-foreground">{workspaceName || "(untitled)"}</p>
       </div>
 
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2">
           Team ({team.length})
         </p>
         {team.length === 0 ? (
-          <p className="text-sm text-gray-400">No team members added.</p>
+          <p className="text-sm text-muted-foreground/70">No team members added.</p>
         ) : (
-          <ul className="text-sm text-gray-700 space-y-1">
+          <ul className="text-sm text-foreground/80 space-y-1">
             {team.map((m, i) => (
               <li key={i}>
                 {m.name} — {m.role} ({m.languages.join("/")})
@@ -598,14 +598,14 @@ function ReviewStep({
         )}
       </div>
 
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2">
           Data sources
         </p>
         {sources.filter((s) => s.enabled).length === 0 ? (
-          <p className="text-sm text-gray-400">None enabled yet.</p>
+          <p className="text-sm text-muted-foreground/70">None enabled yet.</p>
         ) : (
-          <ul className="text-sm text-gray-700 space-y-1">
+          <ul className="text-sm text-foreground/80 space-y-1">
             {sources
               .filter((s) => s.enabled)
               .map((s) => (
@@ -615,11 +615,11 @@ function ReviewStep({
         )}
       </div>
 
-      <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+      <div className="bg-muted/50 rounded-2xl border border-border p-5">
+        <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-2">
           Channels
         </p>
-        <p className="text-sm text-gray-700">
+        <p className="text-sm text-foreground/80">
           WhatsApp: {channels.whatsapp_number || "not set"} · Languages:{" "}
           {channels.languages.join(", ") || "none"} · Web widget:{" "}
           {channels.web_widget_enabled ? "on" : "off"}
@@ -629,7 +629,7 @@ function ReviewStep({
       <button
         onClick={onLaunch}
         disabled={launching || !workspaceName.trim()}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-brand to-brand-2 text-white rounded-xl font-medium hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {launching ? (
           <Loader2 className="w-4 h-4 animate-spin" />
@@ -674,11 +674,11 @@ export default function ConfigurePage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-gray-50 py-10 px-4">
-      <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-gray-100 shadow-sm p-8">
+    <div className="min-h-[calc(100vh-3.5rem)] bg-muted/50 py-10 px-4">
+      <div className="max-w-3xl mx-auto bg-card rounded-3xl border border-border shadow-card p-8">
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-gray-900">Configure a workspace</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl font-bold text-foreground">Configure a workspace</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             The guided setup a new broker or agency goes through — team, data pipeline,
             channels — instead of an engineer configuring it by hand.
           </p>
@@ -720,18 +720,18 @@ export default function ConfigurePage() {
         </AnimatePresence>
 
         {!launched && (
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-100">
+          <div className="flex items-center justify-between mt-8 pt-6 border-t border-border">
             <button
               onClick={() => setStep((s) => Math.max(0, s - 1))}
               disabled={step === 0}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-500 hover:text-gray-800 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
             {step < STEPS.length - 1 && (
               <button
                 onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
-                className="flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition"
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-brand text-white text-sm font-medium rounded-xl hover:bg-brand-2 transition"
               >
                 Next <ArrowRight className="w-4 h-4" />
               </button>

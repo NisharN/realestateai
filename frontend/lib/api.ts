@@ -2,6 +2,7 @@
 
 import { createAuthenticatedFetch } from "./authenticated-fetch";
 import { createClient } from "./supabase/client";
+import type { VoiceRuntimeConfig } from "@/features/buyer/voice/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -496,7 +497,16 @@ export interface PropertyCardDto {
 }
 
 export type VoiceServerMessage =
-  | { type: "ready"; session_id: string; resumed: boolean; tts: boolean; heartbeat_s: number; reply: string; history?: { role: string; text: string; created_at?: string }[] }
+  | {
+      type: "ready";
+      session_id: string;
+      resumed: boolean;
+      tts: boolean;
+      heartbeat_s: number;
+      reply: string;
+      config?: VoiceRuntimeConfig;
+      history?: { role: string; text: string; created_at?: string }[];
+    }
   | { type: "transcript"; turn_id: string; text: string; confidence: number | null }
   | { type: "thinking"; turn_id: string }
   | {
@@ -520,7 +530,7 @@ export type VoiceServerMessage =
       stt_error?: string;
     }
   | { type: "cancelled"; turn_id: string }
-  | { type: "error"; turn_id?: string; code: string; recoverable: boolean }
+  | { type: "error"; turn_id?: string; code: string; recoverable: boolean; max_bytes?: number }
   | { type: "ping" }
   | { type: "pong" };
 
@@ -529,11 +539,14 @@ export type VoiceServerMessage =
  * in-flight turn (barge-in), heartbeats are answered, and dropped sockets are
  * re-opened with the same session_id so the server can replay the transcript.
  */
+export type VoiceConnectionState = "connecting" | "open" | "reconnecting" | "failed" | "closed";
+
 export class VoiceWebSocket {
   private ws: WebSocket | null = null;
   private leadId: string;
   private onMessage: (data: VoiceServerMessage) => void;
   private onError: (error: unknown) => void;
+  private onConnection: (state: VoiceConnectionState) => void;
   private sessionId: string | null = null;
   private closed = false; // terminal: a disconnected instance never reopens
   private retries = 0;
@@ -543,11 +556,17 @@ export class VoiceWebSocket {
   constructor(
     leadId: string,
     onMessage: (data: VoiceServerMessage) => void,
-    onError: (error: unknown) => void
+    onError: (error: unknown) => void,
+    onConnection: (state: VoiceConnectionState) => void = () => undefined,
   ) {
     this.leadId = leadId;
     this.onMessage = onMessage;
     this.onError = onError;
+    this.onConnection = onConnection;
+  }
+
+  get connected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   async connect() {
@@ -571,7 +590,9 @@ export class VoiceWebSocket {
     if (workspaceId) query.set("workspace_id", workspaceId);
     if (this.sessionId) query.set("session_id", this.sessionId);
     if (this.closed) return; // disconnect() raced the auth lookup above
+    this.onConnection(this.retries > 0 ? "reconnecting" : "connecting");
     this.ws = new WebSocket(`${wsUrl}/api/v1/voice/conversation/${this.leadId}?${query}`);
+    this.ws.onopen = () => this.onConnection("open");
 
     this.ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as VoiceServerMessage;
@@ -595,7 +616,12 @@ export class VoiceWebSocket {
 
     this.ws.onclose = (event) => {
       // 44xx codes are auth/lookup rejections; anything else is a drop we resume from.
-      if (this.closed || (event.code >= 4400 && event.code < 4500) || this.retries >= 5) return;
+      this.currentTurnId = null;
+      if (this.closed || (event.code >= 4400 && event.code < 4500) || this.retries >= 5) {
+        this.onConnection(this.closed ? "closed" : "failed");
+        return;
+      }
+      this.onConnection("reconnecting");
       const delay = Math.min(8000, 500 * 2 ** this.retries++);
       this.reconnectTimer = setTimeout(() => void this.connect(), delay);
     };
@@ -613,9 +639,9 @@ export class VoiceWebSocket {
     return id;
   }
 
-  sendAudio(audioBase64: string): string | null {
+  sendAudio(audioBase64: string, mime = ""): string | null {
     const turnId = this.newTurn();
-    return this.send({ type: "audio", data: audioBase64, turn_id: turnId }) ? turnId : null;
+    return this.send({ type: "audio", data: audioBase64, mime, turn_id: turnId }) ? turnId : null;
   }
 
   sendText(text: string, wantAudio = false): string | null {

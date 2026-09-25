@@ -4,12 +4,12 @@ The WebSocket is only a different input/output around the shared turn engine.
 Per-turn failures (STT, engine, TTS) send a template reply and keep the socket
 open. Protocol (client → server):
 
-    {type: audio, data: <b64>, turn_id?}     one utterance (VAD/PTT end)
+    {type: audio, data: <b64>, mime?, turn_id?}  one utterance (VAD/PTT end)
     {type: text, text, turn_id?}             typed fallback
     {type: interrupt}                        barge-in: cancel the in-flight turn
     {type: ping|pong}
 
-Server → client: ``ready`` (with ``history`` when resuming a ``session_id``),
+Server → client: ``ready`` (with ``config`` and, when resuming a ``session_id``, ``history``),
 ``transcript``, ``thinking`` (turn > 1.2 s), ``reply`` (+ optional WAV
 ``audio``; when absent the browser speaks ``spoken_text``), ``cancelled``,
 ``error``, ``ping``.
@@ -27,23 +27,27 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
 from app.auth import AuthBackend, RequestContext, get_auth_backend, get_request_context
+from app.config import get_settings
 from app.database import get_lead_repository
 from app.modules.conversation import templates
 from app.modules.conversation.engine import TurnResult, handle_turn
 from app.modules.conversation.repository import ConversationRepo
+from app.modules.voice.config import VoiceConfig, build_voice_config
 from app.modules.voice.speakify import speakify
 from app.services.voice_service import VoiceService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-HEARTBEAT_S = 20.0
-THINKING_AFTER_S = 1.2
-LOW_CONFIDENCE = 0.6
 MAX_TTS_CHARS = 600
-MAX_TEXT_CHARS = 2000
-MAX_AUDIO_BYTES = 2 * 1024 * 1024  # one utterance (~60 s of 16 kHz mono PCM), not a stream
-MAX_AUDIO_B64_CHARS = MAX_AUDIO_BYTES * 4 // 3 + 4
+
+
+def max_audio_b64_chars(max_audio_bytes: int) -> int:
+    return max_audio_bytes * 4 // 3 + 4
+
+
+MAX_AUDIO_B64_CHARS = max_audio_b64_chars(get_settings().VOICE_MAX_AUDIO_BYTES)
+MAX_TEXT_CHARS = get_settings().VOICE_MAX_TEXT_CHARS
 YES_WORDS = {"yes", "yeah", "yep", "correct", "right", "نعم", "ايوه", "أيوه", "صح"}
 
 
@@ -59,12 +63,15 @@ async def _send(ws: WebSocket, payload: dict[str, Any]) -> bool:
 class VoiceSession:
     """One socket: serialises turns, supports barge-in and resume."""
 
-    def __init__(self, ws: WebSocket, lead_id: str, workspace_id: str, language: str, voice: VoiceService) -> None:
+    def __init__(
+        self, ws: WebSocket, lead_id: str, workspace_id: str, language: str, voice: VoiceService, config: VoiceConfig
+    ) -> None:
         self.ws = ws
         self.lead_id = lead_id
         self.workspace_id = workspace_id
         self.language = language
         self.voice = voice
+        self.config = config
         self.current: asyncio.Task[None] | None = None
         self.pending_confirm: str | None = None  # low-confidence transcript awaiting "yes"
         self.drains: set[asyncio.Task[None]] = set()
@@ -91,7 +98,7 @@ class VoiceSession:
         try:
             if kind == "audio":
                 audio = base64.b64decode(message.get("data") or "")
-                transcript = await self.voice.transcribe(audio, self.language)
+                transcript = await self.voice.transcribe(audio, self.language, mime=str(message.get("mime") or ""))
                 if transcript.ok:
                     user_text, confidence = transcript.text, transcript.confidence
                 else:
@@ -110,7 +117,7 @@ class VoiceSession:
                 if user_text.strip().lower().rstrip(".!") in YES_WORDS:
                     user_text = self.pending_confirm
                 self.pending_confirm = None
-            elif kind == "audio" and confidence is not None and confidence < LOW_CONFIDENCE:
+            elif kind == "audio" and confidence is not None and confidence < self.config.low_confidence:
                 self.pending_confirm = user_text
                 await self._reply_template(turn_id, "confirm_transcript", user_text, transcript=user_text, fallbacks=["stt:low_confidence"])
                 return
@@ -190,7 +197,7 @@ class VoiceSession:
         }
 
     async def _thinking(self, turn_id: str) -> None:
-        await asyncio.sleep(THINKING_AFTER_S)
+        await asyncio.sleep(self.config.thinking_after_s)
         await _send(self.ws, {"type": "thinking", "turn_id": turn_id})
 
     async def _reply_template(
@@ -227,6 +234,7 @@ async def voice_conversation(
 
     await websocket.accept()
     voice = VoiceService()
+    settings = get_settings()
 
     lead_repo = get_lead_repository(context.workspace_id)
     lead = await lead_repo.get_by_id(lead_id)
@@ -234,13 +242,16 @@ async def voice_conversation(
         await websocket.close(code=4404)
         return
     language = lead.get("preferred_language", "en") or "en"
+    config = build_voice_config(voice, language)
+    max_audio_b64 = max_audio_b64_chars(config.max_audio_bytes)
 
     ready: dict[str, Any] = {
         "type": "ready",
         "session_id": session_id or uuid.uuid4().hex,
         "resumed": bool(session_id),
-        "tts": voice.tts_available(language),
-        "heartbeat_s": HEARTBEAT_S,
+        "tts": config.providers.tts == "piper",
+        "heartbeat_s": settings.VOICE_HEARTBEAT_S,
+        "config": config.model_dump(),
         "reply": templates.render("greeting", language, {"brokerage": "our brokerage"}),
     }
     if session_id:
@@ -249,11 +260,11 @@ async def voice_conversation(
         ready["history"] = [{"role": m.get("role"), "text": m.get("text"), "created_at": m.get("created_at")} for m in history]
     await _send(websocket, ready)
 
-    session = VoiceSession(websocket, lead_id, context.workspace_id, language, voice)
+    session = VoiceSession(websocket, lead_id, context.workspace_id, language, voice, config)
 
     async def heartbeat() -> None:
         while True:
-            await asyncio.sleep(HEARTBEAT_S)
+            await asyncio.sleep(settings.VOICE_HEARTBEAT_S)
             if not await _send(websocket, {"type": "ping"}):
                 return
 
@@ -267,10 +278,10 @@ async def voice_conversation(
                     await _send(websocket, {"type": "pong"})
             elif kind == "interrupt":
                 await session.interrupt()
-            elif kind == "audio" and len(message.get("data") or "") > MAX_AUDIO_B64_CHARS:
-                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "audio_too_large", "recoverable": True, "max_bytes": MAX_AUDIO_BYTES})
-            elif kind == "text" and len(message.get("text") or "") > MAX_TEXT_CHARS:
-                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "text_too_long", "recoverable": True, "max_chars": MAX_TEXT_CHARS})
+            elif kind == "audio" and len(message.get("data") or "") > max_audio_b64:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "audio_too_large", "recoverable": True, "max_bytes": config.max_audio_bytes})
+            elif kind == "text" and len(message.get("text") or "") > config.max_text_chars:
+                await _send(websocket, {"type": "error", "turn_id": message.get("turn_id"), "code": "text_too_long", "recoverable": True, "max_chars": config.max_text_chars})
             elif kind in {"audio", "text"}:
                 await session.interrupt()  # a new utterance always wins over an in-flight reply
                 session.start_turn(message)
@@ -283,6 +294,15 @@ async def voice_conversation(
     finally:
         hb.cancel()
         await session.close()
+
+
+@router.get("/config", response_model=VoiceConfig)
+async def voice_config(
+    language: str = Query("en", max_length=8),
+    context: RequestContext = Depends(get_request_context),
+):
+    """Effective voice configuration and provider availability for this deployment."""
+    return build_voice_config(VoiceService(), language)
 
 
 @router.post("/synthesize")

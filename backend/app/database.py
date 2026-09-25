@@ -317,8 +317,11 @@ class PropertyRepository:
         max_price: Optional[float] = None,
         bedrooms: Optional[int] = None,
         limit: int = 10,
+        listing_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         query = self.table.select("*").eq("workspace_id", self.workspace_id).eq("is_active", True)
+        if listing_type:
+            query = query.or_(f"listing_type.eq.{listing_type},listing_type.is.null")
 
         if area:
             query = query.ilike("area", f"%{area}%")
@@ -331,7 +334,7 @@ class PropertyRepository:
         if bedrooms is not None:
             query = query.eq("bedrooms", bedrooms)
 
-        result = query.order("price").limit(limit).execute()
+        result = query.order("price", desc=max_price is not None).limit(limit).execute()
         return result.data or []
 
     async def get_by_id(self, property_id: str) -> Optional[Dict[str, Any]]:

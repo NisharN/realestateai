@@ -100,6 +100,9 @@ def _to_card(prop: dict[str, Any], reasons: list[str]) -> PropertyCard:
     )
 
 
+PURPOSE_LISTING_TYPE = {"buy": "sale", "invest": "sale", "rent": "rent"}
+
+
 async def search(query: PropertyQuery, workspace_id: str) -> SearchResult:
     repo = get_property_repository(workspace_id)
     area_terms: list[str] = list(query.areas)
@@ -108,6 +111,8 @@ async def search(query: PropertyQuery, workspace_id: str) -> SearchResult:
         if c and c.name_en not in area_terms:
             area_terms.append(c.name_en)
             area_terms.extend(a for a in c.aliases if len(a) > 3)
+
+    listing_type = PURPOSE_LISTING_TYPE.get(query.purpose or "")
 
     async def _search(area: str | None) -> list[dict[str, Any]]:
         try:
@@ -119,6 +124,7 @@ async def search(query: PropertyQuery, workspace_id: str) -> SearchResult:
                     max_price=query.max_price,
                     bedrooms=query.bedrooms,
                     limit=max(query.limit * 3, 10),
+                    listing_type=listing_type,
                 ),
                 timeout=TOOL_TIMEOUT_S,
             )
@@ -138,6 +144,8 @@ async def search(query: PropertyQuery, workspace_id: str) -> SearchResult:
     for prop in rows:
         pid = str(prop.get("id"))
         if pid in seen or pid in query.exclude_ids or not _is_live_ok(prop):
+            continue
+        if listing_type and prop.get("listing_type") not in (None, listing_type):
             continue
         seen.add(pid)
         cards.append(_to_card(prop, _reasons(prop, query)))

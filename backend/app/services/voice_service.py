@@ -32,6 +32,39 @@ class Transcript:
         return bool(self.text.strip()) and self.provider is not None
 
 
+_MIME_SUFFIX = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/flac": ".flac",
+}
+
+
+def audio_suffix(mime: str, audio_bytes: bytes) -> str:
+    """File extension for the STT upload: declared MIME first, then container magic, else .wav."""
+    base = mime.split(";")[0].strip().lower()
+    if base in _MIME_SUFFIX:
+        return _MIME_SUFFIX[base]
+    head = audio_bytes[:12]
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm"
+    if head.startswith(b"OggS"):
+        return ".ogg"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return ".wav"
+    if head[4:8] == b"ftyp":
+        return ".m4a"
+    if head.startswith(b"fLaC"):
+        return ".flac"
+    if head.startswith(b"ID3") or head[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}:
+        return ".mp3"
+    return ".wav"
+
+
 def _whisper_confidence(response: object) -> float | None:
     """Mean segment avg_logprob (≈ -1..0) mapped onto 0..1; None when absent."""
     if not isinstance(response, BaseModel):
@@ -77,7 +110,7 @@ class VoiceService:
         self.piper_binary = shutil.which("piper")
 
     # ------------------------------------------------------------------ STT
-    async def transcribe(self, audio_bytes: bytes, language: str = "en") -> Transcript:
+    async def transcribe(self, audio_bytes: bytes, language: str = "en", *, mime: str = "") -> Transcript:
         if not audio_bytes:
             return Transcript(text="", provider=None, error="empty audio")
         if self.settings.FAULT_STT:
@@ -88,7 +121,7 @@ class VoiceService:
         if self.groq_client:
             try:
                 self.last_confidence = None
-                text = await asyncio.wait_for(self._groq_stt(audio_bytes, language), timeout=timeout)
+                text = await asyncio.wait_for(self._groq_stt(audio_bytes, language, mime), timeout=timeout)
                 return Transcript(text=text, provider="groq", confidence=self.last_confidence)
             except Exception as exc:
                 last_error = f"groq: {exc}"
@@ -108,11 +141,11 @@ class VoiceService:
         """Backwards-compatible helper; returns '' when transcription failed."""
         return (await self.transcribe(audio_bytes, language)).text
 
-    async def _groq_stt(self, audio_bytes: bytes, language: str) -> str:
+    async def _groq_stt(self, audio_bytes: bytes, language: str, mime: str = "") -> str:
         assert self.groq_client is not None
         tmp_path = ""
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=audio_suffix(mime, audio_bytes), delete=False) as tmp:
                 tmp.write(audio_bytes)
                 tmp_path = tmp.name
             with open(tmp_path, "rb") as audio_file:

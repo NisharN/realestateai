@@ -35,10 +35,10 @@ function MessageBubble({
       <div
         className={cn(
           "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-          isUser ? "bg-muted" : "bg-brand-gradient",
+          isUser ? "bg-muted" : "bg-brand",
         )}
       >
-        {isUser ? <User className="w-4 h-4 text-muted-foreground" /> : <Bot className="w-4 h-4 text-brand-foreground" />}
+        {isUser ? <User className="w-4 h-4 text-muted-foreground" /> : <Bot className="w-4 h-4 text-gold" />}
       </div>
 
       <div className={cn("max-w-[80%] space-y-3 flex flex-col", isUser ? "items-end" : "items-start")}>
@@ -48,7 +48,7 @@ function MessageBubble({
             "px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
             isUser
               ? "bg-brand text-brand-foreground rounded-ee-md"
-              : "bg-card border border-border text-foreground rounded-es-md shadow-sm",
+              : "bg-card border border-border text-foreground rounded-es-md shadow-card",
           )}
         >
           {lines.map((line, i) => (
@@ -106,7 +106,8 @@ export function MessageList({
   }, [messages, isLoading]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4" role="log" aria-live="polite">
+    <div className="flex-1 overflow-y-auto px-4 py-6" role="log" aria-live="polite">
+      <div className="mx-auto max-w-4xl space-y-5">
       <AnimatePresence>
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} t={t} lang={lang} onViewMap={onViewMap} onAsk={onAsk} busy={isLoading} />
@@ -114,12 +115,18 @@ export function MessageList({
       </AnimatePresence>
 
       {isLoading && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          {t.thinking}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
+            <Bot className="w-4 h-4 text-gold" />
+          </div>
+          <div className="flex items-center gap-2 rounded-2xl rounded-es-md border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground shadow-card">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            {t.thinking}
+          </div>
         </motion.div>
       )}
       <div ref={endRef} />
+      </div>
     </div>
   );
 }

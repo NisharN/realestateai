@@ -20,10 +20,10 @@ const STATUS_META: Record<
   Status,
   { label: string; cls: string; Icon: typeof Check }
 > = {
-  real: { label: "Real", cls: "bg-green-100 text-green-700", Icon: Check },
-  demo: { label: "Seeded data", cls: "bg-amber-100 text-amber-700", Icon: Circle },
-  gated: { label: "Deferred", cls: "bg-gray-100 text-gray-600", Icon: MinusCircle },
-  cut: { label: "Cut", cls: "bg-red-50 text-red-600", Icon: XCircle },
+  real: { label: "Real", cls: "bg-success-soft text-success", Icon: Check },
+  demo: { label: "Seeded data", cls: "bg-warning-soft text-warning", Icon: Circle },
+  gated: { label: "Deferred", cls: "bg-muted text-muted-foreground", Icon: MinusCircle },
+  cut: { label: "Cut", cls: "bg-danger-soft text-danger", Icon: XCircle },
 };
 
 interface Row {
@@ -151,19 +151,19 @@ export default function DocsPage() {
   }, []);
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-gray-50 p-6">
+    <div className="min-h-[calc(100vh-3.5rem)] bg-muted/50 p-6">
       <div className="max-w-4xl mx-auto">
         <header className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">How this works</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-foreground">How this works</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             What&apos;s wired to real services, what&apos;s running on seeded data, and
             what was deliberately left out.
           </p>
         </header>
 
         {health && (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">
+          <div className="bg-card rounded-2xl border border-border shadow-card p-6 mb-6">
+            <h2 className="text-sm font-semibold text-foreground mb-4">
               This deployment
             </h2>
             <dl className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
@@ -177,7 +177,7 @@ export default function DocsPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50 mb-8">
+        <div className="bg-card rounded-2xl border border-border shadow-card divide-y divide-border/60 mb-8">
           {FEATURES.map((row, i) => {
             const meta = STATUS_META[row.status];
             const Icon = meta.Icon;
@@ -196,21 +196,21 @@ export default function DocsPage() {
                     <Icon className="w-3 h-3" />
                     {meta.label}
                   </span>
-                  <h3 className="text-sm font-semibold text-gray-900">
+                  <h3 className="text-sm font-semibold text-foreground">
                     {row.feature}
                   </h3>
                 </div>
-                <p className="text-sm text-gray-600 leading-relaxed">{row.detail}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{row.detail}</p>
               </motion.div>
             );
           })}
         </div>
 
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">
+        <section className="bg-card rounded-2xl border border-border shadow-card p-6 mb-6">
+          <h2 className="text-sm font-semibold text-foreground mb-3">
             Going live, source by source
           </h2>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Every external source has a mode switch. The default is offline demo
             data; each flips independently as its credentials and platform
             approvals land, so nothing blocks on the slowest one.
@@ -226,7 +226,7 @@ export default function DocsPage() {
           </div>
         </section>
 
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-muted-foreground/70">
           Full scope, cuts, and rationale live in PILOT.md at the repository root.
         </p>
       </div>
@@ -237,8 +237,8 @@ export default function DocsPage() {
 function Stat({ label, value }: { label: string; value?: string }) {
   return (
     <div>
-      <dt className="text-xs text-gray-500">{label}</dt>
-      <dd className="text-gray-900 font-medium capitalize">{value ?? "—"}</dd>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-foreground font-medium capitalize">{value ?? "—"}</dd>
     </div>
   );
 }
@@ -246,8 +246,8 @@ function Stat({ label, value }: { label: string; value?: string }) {
 function Timeline({ what, wait }: { what: string; wait: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-gray-700">{what}</span>
-      <span className="text-gray-500 text-xs text-right flex-shrink-0">{wait}</span>
+      <span className="text-foreground/80">{what}</span>
+      <span className="text-muted-foreground text-xs text-right flex-shrink-0">{wait}</span>
     </div>
   );
 }

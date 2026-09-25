@@ -2,36 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+
 :root {
   --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
+  --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --card-foreground: 222 47% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
-  --radius: 0.5rem;
+  --popover-foreground: 222 47% 11%;
+  --primary: 222 47% 18%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 220 14% 96%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 222 47% 18%;
+  --radius: 0.75rem;
 
-  /* Brand tokens (buyer surfaces). Change here, not in components. */
-  --brand: 221.2 83.2% 53.3%;
-  --brand-2: 262 83% 58%;
+  /* Brand: deep navy with a warm gold accent. Change here, not in components. */
+  --ink: 222 47% 11%;
+  --brand: 222 47% 18%;
+  --brand-2: 222 40% 30%;
   --brand-foreground: 0 0% 100%;
-  --surface: 210 20% 98%;
-  --success: 142 71% 45%;
-  --success-soft: 141 84% 93%;
-  --font-ar: "Noto Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
+  --gold: 38 92% 50%;
+  --gold-soft: 40 96% 92%;
+  --canvas: 220 20% 97%;
+  --surface: 220 20% 97%;
+  --success: 158 64% 40%;
+  --success-soft: 152 76% 93%;
+  --warning: 32 95% 44%;
+  --warning-soft: 40 96% 92%;
+  --danger: 0 72% 51%;
+  --danger-soft: 0 86% 96%;
+  --font-ar: var(--font-arabic), "Noto Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
 }
 
 .dark {
@@ -60,9 +69,67 @@
   border-color: hsl(var(--border));
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 body {
-  background-color: hsl(var(--background));
+  background-color: hsl(var(--canvas));
   color: hsl(var(--foreground));
+  font-feature-settings: "cv11", "ss01", "tnum";
+}
+
+h1, h2, h3 {
+  letter-spacing: -0.01em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shared operator-surface primitives */
+.ui-card {
+  @apply rounded-2xl border border-border bg-card shadow-card;
+}
+.ui-input {
+  @apply rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40 transition;
+}
+.ui-btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30;
+}
+.ui-btn-primary {
+  @apply ui-btn bg-brand text-brand-foreground hover:bg-brand-2 shadow-card;
+}
+.ui-btn-secondary {
+  @apply ui-btn border border-border bg-card text-foreground hover:bg-muted;
+}
+.ui-btn-ghost {
+  @apply ui-btn text-muted-foreground hover:bg-muted hover:text-foreground;
+}
+.ui-btn-danger {
+  @apply ui-btn bg-danger-soft text-danger hover:bg-danger hover:text-white;
+}
+.ui-btn-sm {
+  @apply px-3 py-1.5 text-xs;
+}
+.ui-badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide;
+}
+.ui-kicker {
+  @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground;
+}
+.ui-table {
+  @apply w-full text-sm;
+}
+.ui-table th {
+  @apply ui-kicker px-4 py-3 text-start border-b border-border bg-muted/50;
+}
+.ui-table td {
+  @apply px-4 py-3 border-b border-border/70 align-top;
+}
+.ui-table tbody tr:hover td {
+  @apply bg-muted/40;
 }
 
 [dir="rtl"] {
@@ -88,6 +155,8 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 12px;
+  isolation: isolate; /* keep Leaflet's z-index 400+ panes inside the card */
+  z-index: 0;
 }
 
 .leaflet-popup-content-wrapper {

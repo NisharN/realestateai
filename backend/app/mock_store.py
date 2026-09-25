@@ -343,6 +343,7 @@ class MockPropertyRepository:
         max_price: Optional[float] = None,
         bedrooms: Optional[int] = None,
         limit: int = 10,
+        listing_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         results = [
             p for p in _properties.values()
@@ -358,7 +359,12 @@ class MockPropertyRepository:
             results = [p for p in results if (p.get("price") or 0) <= max_price]
         if bedrooms is not None:
             results = [p for p in results if p.get("bedrooms") == bedrooms]
-        results.sort(key=lambda x: x.get("price") or 0)
+        if listing_type:
+            results = [p for p in results if (p.get("listing_type") or listing_type) == listing_type]
+        if max_price is not None:
+            results.sort(key=lambda x: abs((x.get("price") or 0) - max_price))
+        else:
+            results.sort(key=lambda x: x.get("price") or 0)
         return [deepcopy(p) for p in results[:limit]]
 
     async def get_by_id(self, property_id: str) -> Optional[Dict[str, Any]]:
