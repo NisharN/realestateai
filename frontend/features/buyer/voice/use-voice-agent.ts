@@ -116,8 +116,8 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
   }, []);
 
   useEffect(() => {
-    recorderRef.current?.cancel();
-    recorderRef.current = new MicRecorder(config, {
+    if (recorderRef.current) return;
+    recorderRef.current = new MicRecorder(() => configRef.current, {
       onLevel: setLevel,
       onUtterance: (u) => void sendUtterance(u),
       onError: (e) => {
@@ -125,7 +125,7 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
         fail(e);
       },
     });
-  }, [config, fail, sendUtterance]);
+  }, [fail, sendUtterance]);
 
   const handleMessage = useCallback(
     (data: VoiceServerMessage) => {
@@ -133,7 +133,10 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
       switch (data.type) {
         case "ready":
           if (data.config) {
-            if (JSON.stringify(data.config) !== JSON.stringify(configRef.current)) setConfig(data.config);
+            if (JSON.stringify(data.config) !== JSON.stringify(configRef.current)) {
+              configRef.current = data.config; // toggle() reads this before React re-renders
+              setConfig(data.config);
+            }
             if (!data.resumed) setHandsFreeState(data.config.hands_free_default);
           }
           readyResolveRef.current();

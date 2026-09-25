@@ -73,7 +73,11 @@ export class MicRecorder {
   private delivered = false;
   private mime = "";
 
-  constructor(private config: VoiceRuntimeConfig, private cb: RecorderCallbacks) {}
+  constructor(private getConfig: () => VoiceRuntimeConfig, private cb: RecorderCallbacks) {}
+
+  private get config(): VoiceRuntimeConfig {
+    return this.getConfig();
+  }
 
   get active(): boolean {
     return this.recorder?.state === "recording";
