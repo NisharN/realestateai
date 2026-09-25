@@ -57,7 +57,7 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
   const recorderRef = useRef<MicRecorder | null>(null);
   const playbackRef = useRef<PlaybackQueue | null>(null);
   const sessionActiveRef = useRef(false);
-  const lastTranscriptTurnRef = useRef<string | null>(null);
+  const transcriptTurnsRef = useRef<Set<string>>(new Set());
 
   const setStatusSafe = useCallback((s: VoiceStatus) => {
     statusRef.current = s;
@@ -78,7 +78,10 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
     if (!keepError) setError(null);
     setStatusSafe("listening");
     const ok = await rec.start();
-    if (!ok) return false;
+    if (!ok) {
+      if (statusRef.current === "listening") setStatusSafe("idle");
+      return false;
+    }
     sessionActiveRef.current = true;
     return true;
   }, [setStatusSafe]);
@@ -142,19 +145,21 @@ export function useVoiceAgent(handlers: VoiceAgentHandlers, language: Language):
           readyResolveRef.current();
           if (statusRef.current === "connecting") setStatusSafe("idle");
           break;
-        case "transcript":
-          lastTranscriptTurnRef.current = data.turn_id;
+        case "transcript": {
+          const seen = transcriptTurnsRef.current;
+          seen.add(data.turn_id);
+          if (seen.size > 50) seen.delete(seen.values().next().value as string);
           h.onUserTranscript(data.text);
           break;
+        }
         case "thinking":
           if (statusRef.current === "sending") setStatusSafe("thinking");
           break;
         case "reply": {
           const msg: ReplyMessage = data;
-          if (lastTranscriptTurnRef.current !== msg.turn_id && msg.user_text && !msg.stt_error) {
+          if (!transcriptTurnsRef.current.delete(msg.turn_id) && msg.user_text && !msg.stt_error) {
             h.onUserTranscript(msg.user_text);
           }
-          lastTranscriptTurnRef.current = null;
           h.onAgentReply(msg.reply, (msg.properties || []).map(toProperty), msg.area ?? undefined, msg.language);
           if (msg.language) h.onLanguage?.(msg.language);
           if (msg.stt_error) {

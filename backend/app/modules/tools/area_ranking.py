@@ -42,19 +42,21 @@ class AreaRanking(BaseModel):
     data_as_of: str = "inventory"
 
 
-def _split(rows: list[dict[str, Any]]) -> tuple[list[float], list[float]]:
-    sale: list[float] = []
-    rent: list[float] = []
+def _prices(rows: list[dict[str, Any]], kind: str) -> list[float]:
+    out: list[float] = []
     for r in rows:
         price = r.get("price")
-        if not price:
-            continue
-        kind = (r.get("listing_type") or "").lower()
-        if kind == "rent":
-            rent.append(float(price))
-        elif kind in {"sale", "buy", "off_plan"}:
-            sale.append(float(price))
-    return sale, rent
+        if price and (r.get("listing_type") or "").lower() == kind:
+            out.append(float(price))
+    return out
+
+
+async def _samples(repo: Any, area: str) -> tuple[list[float], list[float]]:
+    """Sale and rent samples are fetched with independent limits so a rental-heavy
+    community cannot crowd its sale listings out of a single bounded query."""
+    sale_rows = await repo.search_by_criteria(area=area, limit=SAMPLE_LIMIT, listing_type="sale")
+    rent_rows = await repo.search_by_criteria(area=area, limit=SAMPLE_LIMIT, listing_type="rent")
+    return _prices(sale_rows, "sale"), _prices(rent_rows, "rent")
 
 
 async def area_ranking(workspace_id: str, limit: int = 3) -> AreaRanking:
@@ -66,11 +68,10 @@ async def area_ranking(workspace_id: str, limit: int = 3) -> AreaRanking:
     ranked: list[AreaYield] = []
     for c in COMMUNITIES:
         try:
-            rows = await repo.search_by_criteria(area=c.name_en, limit=SAMPLE_LIMIT)
+            sale, rent = await _samples(repo, c.name_en)
         except Exception as exc:
             logger.warning("area_ranking lookup failed for %s: %s", c.id, exc)
             continue
-        sale, rent = _split(rows)
         if len(sale) < MIN_SAMPLES or len(rent) < MIN_SAMPLES:
             continue
         sale_med, rent_med = median(sale), median(rent)

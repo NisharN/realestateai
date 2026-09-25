@@ -72,6 +72,7 @@ export class MicRecorder {
   private silentSince: number | null = null;
   private delivered = false;
   private mime = "";
+  private generation = 0;
 
   constructor(private getConfig: () => VoiceRuntimeConfig, private cb: RecorderCallbacks) {}
 
@@ -89,14 +90,21 @@ export class MicRecorder {
       this.cb.onError({ code: "mic_unsupported" });
       return false;
     }
+    const gen = ++this.generation;
+    let stream: MediaStream;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (err) {
-      this.cb.onError(mapMicError(err));
+      if (gen === this.generation) this.cb.onError(mapMicError(err));
       return false;
     }
+    if (gen !== this.generation) {
+      stream.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+    this.stream = stream;
     this.mime = pickMimeType(this.config.audio_formats);
     try {
       this.recorder = this.mime ? new MediaRecorder(this.stream, { mimeType: this.mime }) : new MediaRecorder(this.stream);
@@ -128,6 +136,7 @@ export class MicRecorder {
 
   /** Ends the utterance; the blob is delivered through onUtterance. */
   stop(): void {
+    if (!this.recorder) this.generation++;
     if (this.recorder && this.recorder.state !== "inactive") {
       this.recorder.stop();
     } else {
@@ -137,6 +146,7 @@ export class MicRecorder {
 
   /** Discards the current utterance without delivering it. */
   cancel(): void {
+    this.generation++;
     this.delivered = true;
     if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
     this.cleanup();
