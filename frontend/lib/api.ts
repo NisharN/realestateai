@@ -701,6 +701,21 @@ export interface BrokerFollowup {
   lead_band?: string | null;
 }
 
+export type ViewingStatus = "requested" | "confirmed" | "done" | "no_show" | "cancelled";
+
+export interface BrokerViewing {
+  id: string;
+  lead_id: string;
+  broker_id: string | null;
+  property_id: string | null;
+  starts_at: string | null;
+  status: ViewingStatus;
+  notes: string | null;
+  source: "buyer" | "broker";
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface BrokerToday {
   date: string;
   broker_id: string | null;
@@ -715,7 +730,7 @@ export interface BrokerToday {
   new_handoffs: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
   accepted_handoffs: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
   hot_leads: BrokerLeadSummary[];
-  viewings: Record<string, unknown>[];
+  viewings: BrokerViewing[];
   followups: BrokerFollowup[];
   escalated: { handoff: BrokerHandoff; lead: BrokerLeadSummary | null }[];
 }
@@ -746,6 +761,7 @@ export interface BrokerLeadDetail {
   handoff: BrokerHandoff | null;
   sources: Record<string, unknown>[];
   followups: BrokerFollowup[];
+  viewings: BrokerViewing[];
   timeline: TimelineItem[];
 }
 
@@ -787,6 +803,25 @@ export const brokerApi = {
     }),
   followups: (brokerId?: string | null) =>
     fetchApi<BrokerFollowup[]>(withBroker("/api/v1/broker/followups", brokerId)),
+  viewings: (brokerId?: string | null) =>
+    fetchApi<BrokerViewing[]>(withBroker("/api/v1/broker/viewings", brokerId)),
+  createViewing: (input: {
+    lead_id: string;
+    property_id?: string | null;
+    starts_at: string;
+    broker_id?: string | null;
+    notes?: string;
+    confirmed?: boolean;
+  }) =>
+    fetchApi<BrokerViewing>("/api/v1/broker/viewings", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  patchViewing: (id: string, patch: { status?: ViewingStatus; starts_at?: string; notes?: string }) =>
+    fetchApi<BrokerViewing>(`/api/v1/broker/viewings/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 };
 
 // Admin: connectors, field maps, review queue, data health — /api/v1/admin
@@ -851,6 +886,45 @@ export interface DataHealth {
   events_total: number;
 }
 
+export interface TurnStats {
+  turns: number;
+  latency_ms: { p50: number | null; p95: number | null; max: number | null };
+  fallback_turns: number;
+  fallback_rate: number;
+  guard_failures: number;
+  tool_failures: number;
+  llm_fallbacks: number;
+  moves: Record<string, number>;
+}
+
+export interface OpsAlert {
+  code: "fallback_rate" | "consumer_lag" | "connector_failing" | "review_queue";
+  severity: "warning" | "critical";
+  value: number;
+  threshold: number;
+  message: string;
+}
+
+export interface OpsOverview {
+  generated_at: string;
+  window_minutes: number;
+  llm_configured: boolean;
+  window: TurnStats;
+  recent_1000: TurnStats;
+  consumers: Record<string, { pending: number; lag_s: number }>;
+  connectors: {
+    connector_id: string;
+    display_name: string | null;
+    type: string | null;
+    status: string | null;
+    consecutive_failures: number;
+    last_success_at: string | null;
+  }[];
+  review_open: number;
+  thresholds: { fallback_rate: number; consumer_lag_s: number; connector_failures: number; review_queue: number };
+  alerts: OpsAlert[];
+}
+
 export interface CsvUploadResult {
   connector_id: string;
   rows: number;
@@ -902,6 +976,7 @@ export const adminApi = {
   retryErrors: () =>
     fetchApi<{ retried: number; published: number }>("/api/v1/admin/pipeline/retry-errors", { method: "POST" }),
   dataHealth: () => fetchApi<DataHealth>("/api/v1/admin/data-health"),
+  ops: () => fetchApi<OpsOverview>("/api/v1/admin/ops"),
   uploadCsv: async (file: File, connectorId?: string): Promise<ApiResponse<CsvUploadResult>> => {
     const form = new FormData();
     form.append("file", file);

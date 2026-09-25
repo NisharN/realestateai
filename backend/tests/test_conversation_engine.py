@@ -242,6 +242,13 @@ async def test_engine_full_flow_persists_and_hands_off():
     assert handoff and handoff["brief"]["profile"]
     assert (await get_lead_repository(WS).get_by_id(lead["id"]))["score"] == results[-1].score
 
+    viewings = await table("viewings", WS).select(lead_id=lead["id"])
+    assert len(viewings) == 1
+    v = viewings[0]
+    assert v["status"] == "requested" and v["source"] == "buyer" and v["starts_at"]
+    assert v["property_id"] in {c["property_id"] for c in results[1].cards}
+    assert v["broker_id"] == handoff["broker_id"]
+
 
 @pytest.mark.asyncio
 async def test_engine_idempotent_replay():

@@ -12,6 +12,7 @@ from app.auth import RequestContext, WorkspaceRole, get_request_context
 from app.modules.ingestion.connectors.crm_pull import PULL_TYPES, poll_connector, validate_crm_url
 from app.modules.ingestion.field_maps import save_field_map, suggest_field_map
 from app.modules.ingestion.pipeline.processor import process_many, resolve_review, retry_errors
+from app.modules.ops import metrics as ops_metrics
 from app.modules.privacy.service import erase_lead, export_lead, list_requests, record_consent, retention_purge
 from app.modules.store import now_iso, table
 
@@ -293,6 +294,13 @@ async def privacy_consent(lead_id: str, body: ConsentBody, context: RequestConte
 async def privacy_retention_run(context: RequestContext = Depends(get_request_context)):
     _admin(context)
     return await retention_purge(context.workspace_id)
+
+
+@router.get("/ops")
+async def ops_overview(context: RequestContext = Depends(get_request_context)):
+    """Turn latency, fallback rate, guard/tool failures, consumer lag, connector health and active alerts."""
+    _admin(context)
+    return await ops_metrics.collect(context.workspace_id)
 
 
 @router.get("/data-health")
