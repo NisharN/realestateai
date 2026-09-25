@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -77,7 +78,7 @@ class CrmPullConnector:
         return headers
 
     async def fetch_since(self, cursor: str | None) -> tuple[list[RawRecord], str | None]:
-        url = validate_crm_url(self.config.get("url"))
+        url = validate_crm_url(self.config.get("url"), resolve=self._client is None)
         cursor_param = self.config.get("cursor_param") or "updated_after"
         cursor_field = self.config.get("cursor_field") or "updated_at"
         id_field = self.config.get("id_field") or "id"
@@ -131,7 +132,7 @@ class CrmPullConnector:
         external_id = lead.get("crm_external_id")
         if not url or not external_id:
             return
-        validate_crm_url(url)
+        validate_crm_url(url, resolve=self._client is None)
         client = self._client or httpx.AsyncClient(timeout=TIMEOUT_S)
         try:
             resp = await client.patch(url.replace("{id}", str(external_id)), json=fields, headers=self._headers())
@@ -191,8 +192,13 @@ def safe_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def validate_crm_url(url: Any) -> str:
-    """Only public HTTPS hosts: the poller runs inside the backend network."""
+def validate_crm_url(url: Any, *, resolve: bool = False) -> str:
+    """Only public HTTPS hosts: the poller runs inside the backend network.
+
+    ``resolve=True`` additionally resolves the hostname and rejects any address
+    that is not public (DNS pointing at internal services). Redirects are never
+    followed (httpx default), so a public host cannot bounce us inward.
+    """
     if not url or not isinstance(url, str):
         raise ValueError("connector config.url is required")
     parts = urlsplit(url)
@@ -202,12 +208,24 @@ def validate_crm_url(url: Any) -> str:
     if host in ("localhost", "metadata.google.internal") or host.endswith((".local", ".internal", ".localhost")) or "." not in host:
         raise ValueError("CRM url must point at a public host")
     try:
-        ip = ipaddress.ip_address(host.strip("[]"))
-    except ValueError:
+        _reject_internal(ipaddress.ip_address(host.strip("[]")))
         return url
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-        raise ValueError("CRM url must point at a public host")
+    except ValueError as exc:
+        if str(exc).startswith("CRM url"):
+            raise
+    if resolve:
+        try:
+            infos = socket.getaddrinfo(host, parts.port or 443, proto=socket.IPPROTO_TCP)
+        except socket.gaierror as exc:
+            raise ValueError("CRM host could not be resolved") from exc
+        for info in infos:
+            _reject_internal(ipaddress.ip_address(info[4][0]))
     return url
+
+
+def _reject_internal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified or not ip.is_global:
+        raise ValueError("CRM url must point at a public host")
 
 
 def _seconds_between(a: str, b: str) -> float:

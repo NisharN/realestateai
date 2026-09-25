@@ -56,6 +56,15 @@ async def list_connectors(context: RequestContext = Depends(get_request_context)
     return [_public(r) for r in rows]
 
 
+def _check_crm_config(config: dict[str, Any]) -> None:
+    try:
+        validate_crm_url(config.get("url"))
+        if config.get("write_back_url"):
+            validate_crm_url(config["write_back_url"])
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "invalid_crm_url", "message": str(exc)})
+
+
 @router.post("/connectors", status_code=201)
 async def create_connector(body: ConnectorCreate, context: RequestContext = Depends(get_request_context)):
     _admin(context)
@@ -63,10 +72,7 @@ async def create_connector(body: ConnectorCreate, context: RequestContext = Depe
         raise HTTPException(400, detail={"code": "unknown_connector_type", "message": f"type must be one of {CONNECTOR_TYPES}"})
     mode = body.mode or ("push" if body.type in ("csv_upload", "webhook", "manual") else "pull")
     if body.type in PULL_TYPES:
-        try:
-            validate_crm_url(body.config.get("url"))
-        except ValueError as exc:
-            raise HTTPException(400, detail={"code": "invalid_crm_url", "message": str(exc)})
+        _check_crm_config(body.config)
     row = await table("connectors", context.workspace_id).insert(
         {
             "type": body.type,
@@ -105,6 +111,8 @@ async def patch_connector(connector_id: str, body: ConnectorPatch, context: Requ
     if not row:
         raise HTTPException(404, detail={"code": "connector_not_found", "message": "Connector not found"})
     updates: dict[str, Any] = {k: v for k, v in body.model_dump(exclude={"rotate_secret", "credential"}).items() if v is not None}
+    if body.config is not None and row.get("type") in PULL_TYPES:
+        _check_crm_config(body.config)
     if body.credential and row.get("type") != "webhook":
         updates["secret"] = body.credential
     if body.status == "active":

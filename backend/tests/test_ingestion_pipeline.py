@@ -379,3 +379,22 @@ async def test_stranded_landed_records_are_picked_up():
     assert await process_stranded(WS, older_than_seconds=600) == []  # too fresh
     outcomes = await process_stranded(WS, older_than_seconds=0)
     assert [o.status for o in outcomes] == ["published"]
+
+
+def test_crm_url_dns_resolution_rejects_internal_addresses(monkeypatch):
+    import socket as _socket
+
+    from app.modules.ingestion.connectors.crm_pull import validate_crm_url
+
+    monkeypatch.setattr(_socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("10.1.2.3", 443))])
+    with pytest.raises(ValueError):
+        validate_crm_url("https://crm.evil.example/x", resolve=True)
+    monkeypatch.setattr(_socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("104.18.0.1", 443))])
+    assert validate_crm_url("https://crm.good.example/x", resolve=True)
+
+
+def test_connector_patch_validates_crm_url():
+    created = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "config": {"url": "https://crm.test/leads"}}).json()
+    r = client.patch(f"/api/v1/admin/connectors/{created['id']}", json={"config": {"url": "https://192.168.1.1/leads"}})
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_crm_url"
+    assert client.get(f"/api/v1/admin/connectors/{created['id']}").json()["config"]["url"] == "https://crm.test/leads"
