@@ -12,6 +12,7 @@ from app.database import get_lead_repository
 from app.modules.conversation.repository import ConversationRepo
 from app.modules.handoff import followups, viewings
 from app.modules.handoff.service import accept_handoff, decline_handoff, reassign_stale
+from app.modules.ingestion import events as lead_events
 from app.modules.leads.stages import PIPELINE_STAGES, lead_stage
 from app.modules.store import new_id, now_iso, table
 
@@ -196,7 +197,7 @@ async def patch_lead(lead_id: str, body: LeadPatch, context: RequestContext = De
         if field in MIRROR_ONLY:
             continue
         await log.insert({"id": new_id(), "lead_id": lead_id, "field": field, "old_value": lead.get(field), "new_value": value, "changed_by": "broker", "user_id": context.user_id, "at": now_iso()})
-    await table("lead_events", ws).insert({"lead_id": lead_id, "type": "lead.updated", "payload": {"by": "broker", "fields": sorted(k for k in updates if k not in MIRROR_ONLY)}})
+    await lead_events.emit(lead_id, "lead.updated", {"by": "broker", "fields": sorted(k for k in updates if k not in MIRROR_ONLY)}, workspace_id=ws)
     return {"lead": _summary(saved), "changed": sorted(k for k in updates if k not in MIRROR_ONLY)}
 
 
@@ -226,7 +227,7 @@ async def accept(handoff_id: str, body: HandoffAction | None = None, context: Re
     row = await accept_handoff(handoff_id, broker_id, context.workspace_id)
     if not row:
         raise HTTPException(409, detail={"code": "handoff_not_acceptable", "message": "Handoff is not pending for this broker"})
-    await table("lead_events", context.workspace_id).insert({"lead_id": row["lead_id"], "type": "handoff.accepted", "payload": {"handoff_id": handoff_id, "broker_id": broker_id}})
+    await lead_events.emit(row["lead_id"], "handoff.accepted", {"handoff_id": handoff_id, "broker_id": broker_id}, workspace_id=context.workspace_id)
     await followups.cancel_followups(row["lead_id"], workspace_id=context.workspace_id, reason="broker_accepted")
     return _handoff_public(row)
 

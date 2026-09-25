@@ -414,7 +414,14 @@ function RuleEditor({
               <input className="ui-input h-9 text-xs" placeholder="Message to broker" value={param("message")} onChange={(e) => setParam("message", e.target.value)} />
             )}
             {value.action === "set_stage" && (
-              <input className="ui-input h-9 text-xs" placeholder="Stage (e.g. contacted)" value={param("stage")} onChange={(e) => setParam("stage", e.target.value)} />
+              <select className="ui-input h-9 text-xs" value={param("stage")} onChange={(e) => setParam("stage", e.target.value)}>
+                <option value="">Choose a stage…</option>
+                {catalog.stages.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
             )}
             {value.action === "run_job" && (
               <select className="ui-input h-9 text-xs" value={param("job_id")} onChange={(e) => setParam("job_id", e.target.value)}>

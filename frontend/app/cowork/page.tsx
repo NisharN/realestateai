@@ -145,7 +145,7 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab, sub?: IngestionTab
           hint={
             rate == null
               ? "no runs yet"
-              : `${Math.round(rate * 100)}% success · ${ov.runs.failed} failed${ov.runs.avg_duration_ms != null ? ` · avg ${ov.runs.avg_duration_ms} ms` : ""}`
+              : `${Math.round(rate)}% success · ${ov.runs.failed} failed${ov.runs.avg_duration_ms != null ? ` · avg ${ov.runs.avg_duration_ms} ms` : ""}`
           }
           tone={ov.runs.failed ? "warning" : "default"}
         />

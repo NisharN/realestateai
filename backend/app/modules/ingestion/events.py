@@ -4,20 +4,38 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from app.database import get_lead_repository
 from app.modules.store import Row, new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
 
 Handler = Callable[[Row], Awaitable[None]]
 
+# Lead fields captured on every event so consumers can evaluate the state at
+# emit time instead of whatever the mutable lead row holds when they catch up.
+SNAPSHOT_FIELDS: tuple[str, ...] = (
+    "score", "intent_score", "band", "stage", "status", "source", "purpose", "timeline",
+    "budget_max_aed", "assigned_broker", "language", "area_preference",
+)
 
-async def emit(lead_id: str, event_type: str, payload: dict[str, Any], *, workspace_id: str) -> Row:
+
+def snapshot_of(lead: Row | None) -> dict[str, Any]:
+    return {k: lead.get(k) for k in SNAPSHOT_FIELDS if lead and k in lead}
+
+
+async def emit(lead_id: str, event_type: str, payload: dict[str, Any], *, workspace_id: str, lead: Row | None = None) -> Row:
+    if lead is None:
+        try:
+            lead = await get_lead_repository(workspace_id).get_by_id(lead_id)
+        except Exception as exc:  # the event must still land without a snapshot
+            logger.debug("lead snapshot unavailable for %s: %s", lead_id, exc)
+            lead = None
     return await table("lead_events", workspace_id).insert(
         {
             "id": new_id(),
             "lead_id": lead_id,
             "type": event_type,
-            "payload": payload,
+            "payload": {**payload, "lead": snapshot_of(lead)},
             "published_at": None,
             "created_at": now_iso(),
         }

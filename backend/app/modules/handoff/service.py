@@ -7,6 +7,7 @@ from typing import Any
 
 from app.database import get_broker_repository, get_lead_repository
 from app.modules.conversation.state import ConversationState
+from app.modules.ingestion import events
 from app.modules.store import new_id, now_iso, table
 from app.services.whatsapp import get_whatsapp_service
 
@@ -90,9 +91,7 @@ async def create_handoff(
             logger.warning("broker assignment side-effects failed: %s", exc)
         await _alert_broker(broker, brief, saved, workspace_id)
 
-    await table("lead_events", workspace_id).insert(
-        {"lead_id": state.lead_id, "type": "handoff.created", "payload": {"handoff_id": saved["id"], "broker_id": row["broker_id"], "reason": reason}}
-    )
+    await events.emit(state.lead_id, "handoff.created", {"handoff_id": saved["id"], "broker_id": row["broker_id"], "reason": reason}, workspace_id=workspace_id)
     return saved
 
 
@@ -154,7 +153,7 @@ async def _reroute(h: dict[str, Any], workspace_id: str, brokers: list[BrokerPro
     decision = route(brokers, language=h.get("language") or "en", community_ids=list((h.get("brief") or {}).get("profile", {}).get("community_ids") or []), exclude_ids=tried)
     if not decision.broker:
         rows = await handoffs.update({"status": "escalated", "routing_reasons": decision.reasons, "escalated_at": now_iso()}, id=h["id"])
-        await table("lead_events", workspace_id).insert({"lead_id": h["lead_id"], "type": "handoff.escalated", "payload": {"handoff_id": h["id"], "why": why}})
+        await events.emit(h["lead_id"], "handoff.escalated", {"handoff_id": h["id"], "why": why}, workspace_id=workspace_id)
         return rows[0] if rows else None
     updated = await handoffs.update(
         {
@@ -176,6 +175,6 @@ async def _reroute(h: dict[str, Any], workspace_id: str, brokers: list[BrokerPro
         await get_broker_repository(workspace_id).increment_lead_count(decision.broker.id)
     except Exception as exc:  # pragma: no cover
         logger.warning("reassignment side-effects failed: %s", exc)
-    await table("lead_events", workspace_id).insert({"lead_id": h["lead_id"], "type": "handoff.reassigned", "payload": {"handoff_id": h["id"], "from": h.get("broker_id"), "to": decision.broker.id, "why": why}})
+    await events.emit(h["lead_id"], "handoff.reassigned", {"handoff_id": h["id"], "from": h.get("broker_id"), "to": decision.broker.id, "why": why}, workspace_id=workspace_id)
     await _alert_broker(decision.broker, BrokerBrief.model_validate(h["brief"]), updated[0], workspace_id)
     return updated[0]

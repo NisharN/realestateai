@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from app.database import get_lead_repository
+from app.modules.ingestion import events
 from app.modules.store import new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,7 @@ async def request_viewing(
         "updated_at": now_iso(),
     }
     saved = await viewings.insert(row)
-    await table("lead_events", workspace_id).insert(
-        {"lead_id": lead_id, "type": "viewing.requested", "payload": {"viewing_id": saved["id"], "property_id": property_id, "starts_at": when, "source": source}}
-    )
+    await events.emit(lead_id, "viewing.requested", {"viewing_id": saved["id"], "property_id": property_id, "starts_at": when, "source": source}, workspace_id=workspace_id)
     if status == "confirmed":
         await _mark_booked(workspace_id, lead_id)
     return saved
@@ -115,9 +114,7 @@ async def update_viewing(
     rows = await viewings.update(updates, id=viewing_id)
     saved = rows[0] if rows else {**row, **updates}
     if "status" in updates:
-        await table("lead_events", workspace_id).insert(
-            {"lead_id": row["lead_id"], "type": f"viewing.{updates['status']}", "payload": {"viewing_id": viewing_id, "actor": actor}}
-        )
+        await events.emit(row["lead_id"], f"viewing.{updates['status']}", {"viewing_id": viewing_id, "actor": actor}, workspace_id=workspace_id)
         if updates["status"] == "confirmed":
             await _mark_booked(workspace_id, row["lead_id"])
     return saved
