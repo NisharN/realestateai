@@ -16,7 +16,12 @@ from app.modules.geo.communities import get_community
 from app.modules.ingestion import events
 from app.modules.ingestion.field_maps import approved_field_map
 from app.modules.ingestion.models import CanonicalLead, MergeResult, PipelineOutcome
-from app.modules.ingestion.pipeline.stages import clean_phone, clean_record, map_record, validate_record
+from app.modules.ingestion.pipeline.stages import (
+    clean_phone,
+    clean_record,
+    map_record,
+    validate_record,
+)
 from app.modules.store import Row, new_id, now_iso, table
 
 logger = logging.getLogger(__name__)
@@ -75,6 +80,7 @@ async def process_record(raw_id: str, *, workspace_id: str) -> PipelineOutcome:
             workspace_id=workspace_id,
         )
         await set_status("published", lead_id=merge.lead_id, error=None)
+        await _rescore(merge.lead_id, workspace_id, source=cleaned.source)
         if merge.needs_review:
             await _to_review(record, workspace_id, "possible_duplicate_name_match", {"lead_id": merge.lead_id}, cleaned, keep_status=True)
         return PipelineOutcome(raw_record_id=raw_id, status="published", lead_id=merge.lead_id, created=merge.created, reasons=cleaned.warnings)
@@ -87,6 +93,18 @@ async def process_record(raw_id: str, *, workspace_id: str) -> PipelineOutcome:
             return PipelineOutcome(raw_record_id=raw_id, status="review", reasons=[str(exc)])
         await set_status("error", attempts=attempts, error=str(exc))
         return PipelineOutcome(raw_record_id=raw_id, status="error", reasons=[str(exc)])
+
+
+async def _rescore(lead_id: str, workspace_id: str, *, source: str | None) -> None:
+    """Re-score after every pull/inbound so the band tracks what the lead just did. Never fails the pipeline."""
+    from app.modules.agents.rescoring import rescore_lead
+
+    try:
+        lead = await get_lead_repository(workspace_id).get_by_id(lead_id)
+        if lead:
+            await rescore_lead(lead, workspace_id=workspace_id, trigger=f"ingest:{source or 'unknown'}")
+    except Exception:
+        logger.warning("rescore after ingest failed for %s", lead_id, exc_info=True)
 
 
 async def process_many(raw_ids: list[str], *, workspace_id: str) -> list[PipelineOutcome]:

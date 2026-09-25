@@ -301,7 +301,7 @@ async def inbound_connection_webhook(
         raise HTTPException(status_code=409, detail={"code": "connection_inactive", "message": str(exc)})
     except SignatureError:
         raise HTTPException(status_code=401, detail={"code": "invalid_signature", "message": "Invalid signature"})
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail={"code": "invalid_payload", "message": str(exc)})
     raw_ids = out.pop("raw_ids", [])
     if raw_ids:

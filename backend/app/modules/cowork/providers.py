@@ -38,6 +38,7 @@ Capability = Literal[
     "notify",
     "llm",
     "score_leads",
+    "send_voice_note",
 ]
 
 
@@ -227,6 +228,40 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         tags=("uae",),
     ),
     ProviderSpec(
+        "meta_lead_ads",
+        "Meta Lead Ads (Facebook / Instagram)",
+        "portal",
+        "Instant-form leads from Facebook and Instagram campaigns: real-time leadgen webhook plus a scheduled pull of every form on the page.",
+        "oauth_token",
+        ("receive_leads", "pull_leads"),
+        (
+            ConfigField("page_id", "Facebook Page id"),
+            ConfigField("access_token", "Page access token", secret=True, help="Needs leads_retrieval + pages_manage_ads."),
+            ConfigField("app_secret", "App secret", secret=True, required=False, help="Verifies X-Hub-Signature-256 on webhooks."),
+            ConfigField("verify_token", "Webhook verify token", secret=True, required=False),
+        ),
+        inbound_webhook=True,
+        docs_url="https://developers.facebook.com/docs/marketing-api/guides/lead-ads/retrieving",
+        test_method="http_ping",
+        tags=("ads", "leads"),
+    ),
+    ProviderSpec(
+        "broker_api",
+        "Broker / developer lead API",
+        "portal",
+        "Any developer, aggregator or referral partner exposing a JSON leads or listings endpoint (bearer token).",
+        "api_key",
+        ("pull_leads", "pull_listings"),
+        (
+            _BASE_URL,
+            ConfigField("api_key", "Bearer token", secret=True, required=False),
+            ConfigField("leads_path", "Leads path", required=False, placeholder="/leads"),
+            ConfigField("listings_path", "Listings path", required=False, placeholder="/listings"),
+            ConfigField("items_path", "Items JSON path", required=False, placeholder="data"),
+        ),
+        test_method="http_ping",
+    ),
+    ProviderSpec(
         "portal_webhook",
         "Generic lead webhook",
         "portal",
@@ -254,12 +289,27 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         test_method="http_ping",
     ),
     ProviderSpec(
+        "voice_notes",
+        "Automated voice notes",
+        "messaging",
+        "Turns a personalised follow-up into speech (Piper / configured TTS) and delivers it as a WhatsApp audio message. Independent of the text WhatsApp connector; no text fallback.",
+        "oauth_token",
+        ("send_voice_note",),
+        (
+            ConfigField("phone_number_id", "WhatsApp phone number id"),
+            _ACCESS_TOKEN,
+            ConfigField("voice_language", "Default voice", required=False, placeholder="en | ar"),
+        ),
+        test_method="voice_ping",
+        tags=("voice", "follow-up"),
+    ),
+    ProviderSpec(
         "gmail",
         "Gmail",
         "email",
-        "Read portal lead e-mails (Bayut, Dubizzle, Property Finder) and send follow-ups.",
+        "Reads portal lead e-mails (Bayut, Dubizzle, Property Finder, website forms), extracts a structured lead and adds it to the CRM; also sends follow-ups.",
         "oauth_token",
-        ("read_email", "send_email", "receive_leads"),
+        ("read_email", "send_email", "receive_leads", "pull_leads"),
         (
             ConfigField("mailbox", "Mailbox", placeholder="leads@agency.ae"),
             _ACCESS_TOKEN,

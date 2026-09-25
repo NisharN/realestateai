@@ -6,11 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
-from app.modules.ops.health import deep_health
-from app.modules.store import load_demo_scale
 from app.api import (
     admin,
+    analytics,
     auth,
     billing,
     broker,
@@ -28,6 +26,9 @@ from app.api import (
     workflows,
     workspace,
 )
+from app.config import get_settings
+from app.modules.ops.health import deep_health
+from app.modules.store import load_demo_scale
 
 # Configure logging
 logging.basicConfig(
@@ -141,6 +142,7 @@ app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
 app.include_router(market.router, prefix="/api/v1/market", tags=["Market"])
 app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])
 app.include_router(cowork.router, prefix="/api/v1/cowork", tags=["Co-work"])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 
 
 if __name__ == "__main__":

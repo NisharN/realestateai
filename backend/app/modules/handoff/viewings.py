@@ -117,7 +117,20 @@ async def update_viewing(
         await events.emit(row["lead_id"], f"viewing.{updates['status']}", {"viewing_id": viewing_id, "actor": actor}, workspace_id=workspace_id)
         if updates["status"] == "confirmed":
             await _mark_booked(workspace_id, row["lead_id"])
+        await _rescore_after_viewing(workspace_id, row["lead_id"], updates["status"])
     return saved
+
+
+async def _rescore_after_viewing(workspace_id: str, lead_id: str, status: str) -> None:
+    """Attendance, cancellations and no-shows move the score; never fails the viewing update."""
+    from app.modules.agents.rescoring import rescore_lead
+
+    try:
+        lead = await get_lead_repository(workspace_id).get_by_id(lead_id)
+        if lead:
+            await rescore_lead(lead, workspace_id=workspace_id, trigger=f"viewing:{status}")
+    except Exception:
+        logger.warning("rescore after viewing %s failed for %s", status, lead_id, exc_info=True)
 
 
 async def list_viewings(

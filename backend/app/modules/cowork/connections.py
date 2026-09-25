@@ -249,8 +249,12 @@ def _ping_request(spec: ProviderSpec, cfg: dict[str, str]) -> tuple[str, str, di
     base = (cfg.get("base_url") or "").rstrip("/")
     if spec.id == "hubspot":
         return "GET", "https://api.hubapi.com/crm/v3/objects/contacts?limit=1", None
-    if spec.id == "whatsapp":
+    if spec.id in ("whatsapp", "voice_notes"):
         return "GET", f"https://graph.facebook.com/v20.0/{cfg.get('phone_number_id')}", None
+    if spec.id == "meta_lead_ads":
+        return "GET", f"https://graph.facebook.com/v20.0/{cfg.get('page_id')}?fields=id,name", None
+    if spec.id == "broker_api":
+        return "GET", f"{base}{cfg.get('leads_path') or '/leads'}?limit=1", None
     if spec.id == "gmail":
         return "GET", "https://gmail.googleapis.com/gmail/v1/users/me/profile", None
     if spec.id == "google_calendar":
@@ -314,6 +318,23 @@ async def test_connection(workspace_id: str, connection_id: str) -> dict[str, An
         await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
         return {"status": "ok" if ok else "failed", "detail": detail}
 
+    if spec.test_method == "voice_ping":
+        from app.services.voice_service import VoiceService
+
+        lang = (cfg.get("voice_language") or "en").strip().lower()[:2]
+        tts_ok = VoiceService().tts_available(lang)
+        method, url, body = _ping_request(spec, cfg)
+        try:
+            resp = await _http(method, url, headers=_auth_headers(spec, cfg), body=body)
+            wa_ok = resp.status_code < 400
+            wa_detail = f"WhatsApp audio endpoint reachable (HTTP {resp.status_code})" if wa_ok else f"WhatsApp rejected the phone number / token (HTTP {resp.status_code})"
+        except Exception as exc:  # noqa: BLE001
+            wa_ok, wa_detail = False, safe_error(exc)
+        ok = tts_ok and wa_ok
+        detail = f"{'TTS voice ready' if tts_ok else f'No TTS voice for “{lang}” — set PIPER_MODEL_PATH'} · {wa_detail}"
+        await _record_test(workspace_id, connection_id, "ok" if ok else "failed", detail, error=None if ok else detail)
+        return {"status": "ok" if ok else "failed", "detail": detail, "tts": tts_ok, "delivery": wa_ok}
+
     if spec.test_method == "webhook":
         detail = "Inbound webhook ready — send a signed test from the Webhook panel"
         await _record_test(workspace_id, connection_id, "ok", detail)
@@ -365,6 +386,7 @@ SAMPLE_LEADS: dict[str, dict[str, Any]] = {
     "dubizzle": {"lead_id": "dz-test-1", "name": "Test Buyer", "mobile": "+971501234567", "email": "buyer@example.com", "message": "Viewing this weekend?", "listing_reference": "DZ-42"},
     "realestate_crm": {"event": "lead.updated", "lead": {"id": "crm-test-1", "first_name": "Test", "last_name": "Buyer", "phone": "+971501234567", "stage": "qualified", "budget_max_aed": 2500000}},
     "whatsapp": {"entry": [{"changes": [{"value": {"messages": [{"from": "971501234567", "text": {"body": "Hi, looking for a villa"}}]}}]}]},
+    "meta_lead_ads": {"object": "page", "entry": [{"id": "1234567890", "changes": [{"field": "leadgen", "value": {"leadgen_id": "meta-test-1", "form_id": "form-1", "page_id": "1234567890", "created_time": 1700000000}}]}]},
     "portal_webhook": {"external_id": "web-test-1", "name": "Test Buyer", "phone": "+971501234567", "email": "buyer@example.com", "message": "Website form test", "source": "website"},
 }
 
@@ -385,6 +407,13 @@ def normalize_inbound(provider: str, data: Any) -> list[RawRecord]:
             items = [i for i in data["leads"] if isinstance(i, dict)]
         elif isinstance(data.get("lead"), dict):
             items = [{**data["lead"], "event": data.get("event")}]
+        elif provider == "meta_lead_ads" and isinstance(data.get("entry"), list):
+            items = []
+            for entry in data["entry"]:
+                for change in (entry or {}).get("changes", []) or []:
+                    value = (change or {}).get("value") or {}
+                    if value.get("leadgen_id"):
+                        items.append({"external_id": str(value["leadgen_id"]), "leadgen_id": str(value["leadgen_id"]), "form_id": value.get("form_id"), "page_id": value.get("page_id") or (entry or {}).get("id"), "created_time": value.get("created_time"), "pending_fetch": True})
         elif provider == "whatsapp" and isinstance(data.get("entry"), list):
             items = []
             for entry in data["entry"]:
@@ -394,7 +423,7 @@ def normalize_inbound(provider: str, data: Any) -> list[RawRecord]:
         else:
             items = [data]
     else:
-        raise ValueError("payload must be a JSON object or list")
+        raise TypeError("payload must be a JSON object or list")
 
     records: list[RawRecord] = []
     for item in items[:MAX_ITEMS]:
@@ -409,9 +438,16 @@ def normalize_inbound(provider: str, data: Any) -> list[RawRecord]:
             "listing_reference": item.get("listing_reference") or item.get("reference") or item.get("property_reference"),
             "stage": item.get("stage"),
             "budget_max_aed": item.get("budget_max_aed") or item.get("budget"),
+            "area": item.get("area") or item.get("area_preference") or item.get("community") or item.get("location"),
+            "purpose": item.get("purpose") or item.get("intent"),
+            "timeline": item.get("timeline"),
+            "property_type": item.get("property_type") or item.get("type"),
+            "bedrooms": item.get("bedrooms") or item.get("beds"),
             "source": provider,
             "raw": item,
         }
+        if item.get("pending_fetch"):
+            payload.update({"pending_fetch": True, "leadgen_id": item.get("leadgen_id"), "form_id": item.get("form_id"), "page_id": item.get("page_id")})
         payload = {k: v for k, v in payload.items() if v not in (None, "")}
         ext = payload.get("external_id")
         records.append(RawRecord(external_id=str(ext) if ext else None, payload=payload, source_hint=provider))
@@ -435,12 +471,13 @@ async def handle_inbound(
         raise LookupError("connection has no inbound webhook")
     if row.get("status") != "active":
         raise PermissionError(f"connection is {row.get('status')}")
-    secret = row.get("webhook_secret")
-    if not secret:
+    cfg = dict(row.get("config") or {})
+    secrets = [s for s in (row.get("webhook_secret"), cfg.get("app_secret") if spec.id == "meta_lead_ads" else None) if s]
+    if not secrets:
         raise PermissionError("webhook has no signing secret")
     lowered = {k.lower(): v for k, v in headers.items()}
     provided = lowered.get("x-signature-256") or lowered.get("x-hub-signature-256") or lowered.get("x-signature")
-    if not verify_hmac_sha256(secret, body, provided):
+    if not any(verify_hmac_sha256(s, body, provided) for s in secrets):
         if not dry_run:
             await table(TABLE, workspace_id).update({"last_error": "invalid webhook signature", "updated_at": now_iso()}, id=connection_id)
         raise SignatureError("invalid signature")
@@ -451,6 +488,8 @@ async def handle_inbound(
     records = normalize_inbound(spec.id, data)
     if dry_run:
         return {"status": "ok", "dry_run": True, "records": [r.payload for r in records], "count": len(records)}
+    if spec.id == "meta_lead_ads":
+        records = await _meta_resolve(spec, cfg, records)
     result = await land(records, connector_id=None, workspace_id=workspace_id)
     await table(TABLE, workspace_id).update(
         {
@@ -596,6 +635,8 @@ async def execute_action(workspace_id: str, connection_row: Row, action: str, pa
             return await _create_event(spec, cfg, params)
         if action == "notify":
             return await _notify(spec, cfg, params)
+        if action == "send_voice_note":
+            return await _send_voice_note(spec, cfg, params)
     except Exception as exc:  # noqa: BLE001
         logger.warning("connector action %s on %s failed: %s", action, spec.id, safe_error(exc))
         return {"ok": False, "error": safe_error(exc)}
@@ -631,22 +672,149 @@ async def _pull_listings(workspace_id: str, spec: ProviderSpec, cfg: dict[str, s
     return {"ok": True, "fetched": len(items), **counts}
 
 
-async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+async def _land_and_process(workspace_id: str, records: list[RawRecord], *, fetched: int, **extra: Any) -> dict[str, Any]:
     from app.modules.ingestion.pipeline.processor import process_many
 
+    result = await land(records, connector_id=None, workspace_id=workspace_id)
+    processed = await process_many(result.ids, workspace_id=workspace_id) if result.ids else []
+    published = [p for p in processed if p.status == "published"]
+    return {
+        "ok": True,
+        "fetched": fetched,
+        "landed": len(result.landed),
+        "duplicates": result.duplicates,
+        "processed": len(processed),
+        "published": len(published),
+        "review": sum(1 for p in processed if p.status == "review"),
+        "lead_ids": [p.lead_id for p in published if p.lead_id],
+        **extra,
+    }
+
+
+async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    if spec.id == "gmail":
+        return await _pull_gmail_leads(workspace_id, spec, cfg, params)
+    if spec.id == "meta_lead_ads":
+        return await _pull_meta_leads(workspace_id, spec, cfg, params)
     if spec.id == "bitrix24":
         url = f"{(cfg.get('webhook_url') or '').rstrip('/')}/crm.lead.list.json"
     elif spec.id == "hubspot":
         url = "https://api.hubapi.com/crm/v3/objects/contacts?limit=100&properties=firstname,lastname,phone,email"
     else:
         base = (cfg.get("base_url") or "").rstrip("/")
-        url = f"{base}{cfg.get('leads_path') or params.get('path') or '/v1/leads'}" if spec.id != "generic_crm" else base
+        default_path = "/leads" if spec.id == "broker_api" else "/v1/leads"
+        url = f"{base}{cfg.get('leads_path') or params.get('path') or default_path}" if spec.id != "generic_crm" else base
     data = await _get_json(spec, cfg, url)
     items = _items(data, cfg.get("items_path"))
-    records = normalize_inbound(spec.id, items)
-    result = await land(records, connector_id=None, workspace_id=workspace_id)
-    processed = await process_many(result.ids, workspace_id=workspace_id) if result.ids else []
-    return {"ok": True, "fetched": len(items), "landed": len(result.landed), "duplicates": result.duplicates, "processed": len(processed)}
+    return await _land_and_process(workspace_id, normalize_inbound(spec.id, items), fetched=len(items))
+
+
+GRAPH = "https://graph.facebook.com/v20.0"
+GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
+GMAIL_MAX_MESSAGES = 50
+
+
+async def _pull_gmail_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    """List matching messages, extract a structured lead from each and push through the pipeline."""
+    from urllib.parse import quote
+
+    from app.modules.cowork.lead_extraction import (
+        extract_lead,
+        gmail_message_text,
+        source_from_sender,
+        to_raw_payload,
+    )
+
+    query = params.get("query") or cfg.get("label") or "from:(bayut.com OR dubizzle.com OR propertyfinder.ae) newer_than:1d"
+    limit = min(int(params.get("limit") or GMAIL_MAX_MESSAGES), GMAIL_MAX_MESSAGES)
+    listing = await _get_json(spec, cfg, f"{GMAIL}/messages?q={quote(query)}&maxResults={limit}")
+    ids = [m.get("id") for m in (listing.get("messages") or []) if isinstance(m, dict) and m.get("id")]
+    records: list[RawRecord] = []
+    low_confidence = 0
+    for mid in ids:
+        msg = await _get_json(spec, cfg, f"{GMAIL}/messages/{mid}?format=full")
+        subject, sender, body = gmail_message_text(msg)
+        lead = await extract_lead(subject, body, sender)
+        if not (lead.phone or lead.email):
+            low_confidence += 1
+            continue
+        payload = to_raw_payload(lead, external_id=f"gmail:{mid}", source=source_from_sender(sender), extra={"email_subject": subject[:200], "email_from": sender[:200]})
+        records.append(RawRecord(external_id=f"gmail:{mid}", payload=payload, source_hint=payload["source"]))
+    return await _land_and_process(workspace_id, records, fetched=len(ids), skipped_no_contact=low_confidence, query=query)
+
+
+async def _meta_fetch_lead(spec: ProviderSpec, cfg: dict[str, str], leadgen_id: str) -> dict[str, Any] | None:
+    try:
+        return await _get_json(spec, cfg, f"{GRAPH}/{leadgen_id}?fields=id,created_time,field_data,form_id,ad_id,adset_id,campaign_id")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("meta leadgen fetch failed: %s", safe_error(exc))
+        return None
+
+
+async def _meta_resolve(spec: ProviderSpec, cfg: dict[str, str], records: list[RawRecord]) -> list[RawRecord]:
+    """Webhooks only carry ``leadgen_id``; fetch the form answers before landing. Unresolvable leads still land (for retry/review)."""
+    from app.modules.cowork.lead_extraction import meta_lead_payload
+
+    out: list[RawRecord] = []
+    for rec in records:
+        p = rec.payload
+        if not p.get("pending_fetch") or not cfg.get("access_token"):
+            out.append(rec)
+            continue
+        lead = await _meta_fetch_lead(spec, cfg, str(p["leadgen_id"]))
+        if lead:
+            out.append(RawRecord(external_id=rec.external_id, payload=meta_lead_payload(lead, form_id=p.get("form_id"), page_id=p.get("page_id")), source_hint="meta_lead_ads"))
+        else:
+            out.append(rec)
+    return out
+
+
+async def _pull_meta_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    """Scheduled catch-up: every form on the page → its recent leads (covers missed webhooks)."""
+    from app.modules.cowork.lead_extraction import meta_lead_payload
+
+    page = cfg.get("page_id")
+    forms = await _get_json(spec, cfg, f"{GRAPH}/{page}/leadgen_forms?fields=id,name,status&limit=50")
+    records: list[RawRecord] = []
+    fetched = 0
+    for form in _items(forms, "data"):
+        if form.get("status") not in (None, "ACTIVE"):
+            continue
+        leads = await _get_json(spec, cfg, f"{GRAPH}/{form['id']}/leads?fields=id,created_time,field_data,ad_id,adset_id,campaign_id&limit=100")
+        for lead in _items(leads, "data"):
+            fetched += 1
+            payload = meta_lead_payload(lead, form_id=str(form["id"]), page_id=page)
+            records.append(RawRecord(external_id=str(lead.get("id")) if lead.get("id") else None, payload=payload, source_hint="meta_lead_ads"))
+    return await _land_and_process(workspace_id, records, fetched=fetched)
+
+
+async def _send_voice_note(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+    """TTS → upload media → WhatsApp audio message. Fails loudly; never degrades to a text send."""
+    from app.services.voice_service import VoiceService
+
+    text = str(params.get("text") or "").strip()
+    to = str(params.get("to") or "").strip().lstrip("+")
+    lang = (params.get("language") or cfg.get("voice_language") or "en").strip().lower()[:2]
+    if not text or not to:
+        return {"ok": False, "error": "voice note needs text and a recipient"}
+    audio = await VoiceService().text_to_speech(text[:800], lang)
+    if not audio:
+        return {"ok": False, "error": f"TTS unavailable for '{lang}' — voice note not sent"}
+    headers = _auth_headers(spec, cfg)
+    pn = cfg.get("phone_number_id")
+    pinned = pin_crm_url(f"{GRAPH}/{pn}/media")
+    async with _client_factory() as client:
+        up = await client.post(pinned.url, headers={**headers, **pinned.headers}, data={"messaging_product": "whatsapp", "type": "audio/ogg"}, files={"file": ("note.ogg", audio, "audio/ogg")}, extensions=pinned.extensions or None)
+    if up.status_code >= 400:
+        return {"ok": False, "error": f"media upload failed (HTTP {up.status_code})"}
+    media_id = (up.json() or {}).get("id")
+    if not media_id:
+        return {"ok": False, "error": "media upload returned no id"}
+    resp = await _http("POST", f"{GRAPH}/{pn}/messages", headers=headers, body={"messaging_product": "whatsapp", "to": to, "type": "audio", "audio": {"id": media_id}})
+    if resp.status_code >= 400:
+        return {"ok": False, "error": f"WhatsApp audio send failed (HTTP {resp.status_code})"}
+    msgs = (resp.json() or {}).get("messages") or []
+    return {"ok": True, "media_id": media_id, "message_id": msgs[0].get("id") if msgs else None, "seconds": round(len(audio) / 32000, 1), "language": lang}
 
 
 async def _push_lead(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:

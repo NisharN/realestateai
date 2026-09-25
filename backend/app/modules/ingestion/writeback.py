@@ -54,7 +54,14 @@ def fields_for(lead: Row, connector: Row) -> dict[str, Any]:
     return {k: lead.get(k) for k in wanted if k in ALLOWED_FIELDS and lead.get(k) is not None}
 
 
-async def handle_event(event: Row, *, workspace_id: str, client: httpx.AsyncClient | None = None) -> bool:
+async def handle_event(
+    event: Row,
+    *,
+    workspace_id: str,
+    client: httpx.AsyncClient | None = None,
+    sent_this_run: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> bool:
+    """Write the lead's current state to each source CRM; identical payloads already sent in this run are skipped."""
     if event.get("type") not in EVENT_TYPES:
         return False
     targets = await _targets(event["lead_id"], workspace_id)
@@ -66,16 +73,23 @@ async def handle_event(event: Row, *, workspace_id: str, client: httpx.AsyncClie
     sent = False
     for connector, external_id in targets:
         fields = fields_for(lead, connector)
+        key = (str(event["lead_id"]), str(connector["id"]))
+        if sent_this_run is not None and sent_this_run.get(key) == fields:
+            continue
         if fields:
+            if sent_this_run is not None:
+                sent_this_run[key] = fields
             await CrmPullConnector(connector, client=client).write_back({**lead, "crm_external_id": external_id}, fields)
             sent = True
     return sent
 
 
 async def run_writeback(workspace_id: str, limit: int = 100, *, client: httpx.AsyncClient | None = None) -> int:
+    sent_this_run: dict[tuple[str, str], dict[str, Any]] = {}
+
     async def handler(event: Row) -> None:
         try:
-            await handle_event(event, workspace_id=workspace_id, client=client)
+            await handle_event(event, workspace_id=workspace_id, client=client, sent_this_run=sent_this_run)
         except Exception as exc:
             raise RuntimeError(safe_error(exc)) from None
 

@@ -45,6 +45,12 @@ StepType = Literal[
     "llm.draft_message",
     "tasks.create",
     "job.run",
+    "analytics.query",
+    "followups.schedule",
+    "leads.reject",
+    "leads.rescore",
+    "listings.refresh",
+    "voice.send_note",
 ]
 
 STEP_TYPES: dict[str, dict[str, Any]] = {
@@ -63,6 +69,12 @@ STEP_TYPES: dict[str, dict[str, Any]] = {
     "llm.draft_message": {"label": "AI draft follow-up per lead", "group": "llm", "needs_connection": False, "params": ["channel", "tone", "language"]},
     "tasks.create": {"label": "Create broker tasks for selected leads", "group": "data", "needs_connection": False, "params": ["title", "due_in_hours"]},
     "job.run": {"label": "Run a scheduled job", "group": "data", "needs_connection": False, "params": ["job_id"]},
+    "analytics.query": {"label": "Ask analytics (e.g. top 5 leads, who wants Palm Jumeirah)", "group": "data", "needs_connection": False, "params": ["question", "metric", "area", "band", "limit"]},
+    "followups.schedule": {"label": "Schedule follow-up cadence for selected leads", "group": "data", "needs_connection": False, "params": ["band"]},
+    "leads.reject": {"label": "Auto-close unresponsive / unqualified leads", "group": "data", "needs_connection": False, "params": ["max_score", "stale_hours", "reason"]},
+    "leads.rescore": {"label": "Re-score selected leads from their latest behaviour", "group": "llm", "needs_connection": False, "capability": "score_leads", "params": []},
+    "listings.refresh": {"label": "Expire stale listings & flag price changes", "group": "data", "needs_connection": False, "params": ["stale_days", "limit"]},
+    "voice.send_note": {"label": "Send automated WhatsApp voice note", "group": "connector", "needs_connection": True, "capability": "send_voice_note", "params": ["template", "language", "use_drafts"]},
 }
 
 
@@ -634,13 +646,139 @@ async def _connector_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, An
         text = params.get("text") or ctx.summary or f"{ctx.routine.get('name')}: {len(ctx.leads)} lead(s), {len(ctx.issues)} listing issue(s)."
         return await conn.execute_action(ws, row, "notify", {"text": text, "to": params.get("to")})
 
+    if action == "send_note":
+        return await _voice_note_step(ctx, row, params)
+
     return {"error": f"unknown connector action {action}"}
+
+
+async def _voice_note_step(ctx: RunContext, row: Row, params: dict[str, Any]) -> dict[str, Any]:
+    """One voice note per consented lead. A failed TTS/delivery is reported, never converted to a text send."""
+    sent = skipped = failed = 0
+    errors: list[str] = []
+    template = str(params.get("template") or "")
+    for lead in ctx.leads[:MAX_MESSAGES_PER_RUN]:
+        if not _allowed(lead):
+            skipped += 1
+            continue
+        text = ctx.drafts.get(lead["id"]) if params.get("use_drafts", True) else None
+        text = text or (render_template(template, lead) if template else None)
+        if not text:
+            skipped += 1
+            continue
+        lang = params.get("language") or ("ar" if lead.get("language") == "ar" else None)
+        res = await conn.execute_action(ctx.workspace_id, row, "send_voice_note", {"to": lead.get("phone") or lead.get("phone_e164"), "text": text, "language": lang, "lead_id": lead["id"]})
+        if res.get("simulated"):
+            return {"simulated": True, "reason": res.get("reason"), "would_send": len(ctx.leads) - skipped}
+        if res.get("ok"):
+            sent += 1
+        else:
+            failed += 1
+            if len(errors) < 3 and res.get("error"):
+                errors.append(str(res["error"])[:120])
+    out: dict[str, Any] = {"sent": sent, "failed": failed, "skipped_no_consent_or_text": skipped, "text_fallback": False}
+    if failed and not sent:
+        out["error"] = f"no voice notes delivered: {'; '.join(errors) or 'connector error'}"
+    elif errors:
+        out["errors"] = errors
+    return out
+
+
+async def _analytics_query(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
+    from app.modules.analytics.queries import AnalyticsQuery, parse_question, run_query
+
+    if params.get("question"):
+        q = parse_question(str(params["question"]), default_limit=int(params.get("limit") or 5))
+    else:
+        q = AnalyticsQuery(**{k: v for k, v in params.items() if k in AnalyticsQuery.model_fields and v not in (None, "")})
+    result = await run_query(q, workspace_id=ctx.workspace_id)
+    ids = [r["id"] for r in result.rows if isinstance(r, dict) and r.get("id")]
+    if ids:
+        from app.database import get_lead_repository
+
+        repo = get_lead_repository(ctx.workspace_id)
+        ctx.leads = [lead for lead in [await repo.get_by_id(i) for i in ids[:MAX_LEADS]] if lead]
+    ctx.summary = f"{result.title}: {result.summary}"
+    return {"metric": q.metric, "title": result.title, "total": result.total, "rows": len(result.rows), "selected": len(ids), "answer": result.summary}
+
+
+async def _schedule_followups(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
+    from app.modules.handoff.followups import CADENCE_HOURS, schedule_followups
+
+    scheduled = skipped = broker_owned = 0
+    for lead in ctx.leads[:MAX_LEADS]:
+        band = str(params.get("band") or lead.get("band") or "warm").lower()
+        if not CADENCE_HOURS.get(band):
+            broker_owned += 1
+            continue
+        rows = await schedule_followups(lead["id"], band, workspace_id=ctx.workspace_id)
+        if rows:
+            scheduled += 1
+        else:
+            skipped += 1
+    return {"scheduled": scheduled, "skipped_no_consent": skipped, "broker_owned": broker_owned}
+
+
+async def _reject_leads(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
+    """Close leads that are both low-scored and silent; never touches viewing/offer stages."""
+    from app.database import get_lead_repository
+    from app.modules.handoff.followups import cancel_followups
+    from app.modules.ingestion import events
+
+    repo = get_lead_repository(ctx.workspace_id)
+    max_score = int(params.get("max_score") or 30)
+    stale_hours = float(params.get("stale_hours") or 24 * 14)
+    reason = str(params.get("reason") or "auto_reject_unresponsive")[:80]
+    closed = protected = skipped = 0
+    for lead in ctx.leads[:MAX_LEADS]:
+        stage = lead_stage(lead)
+        if stage in ("viewing_booked", "offer", "closed", "lost", "opted_out"):
+            protected += 1
+            continue
+        age = _hours_since(lead.get("last_contact_at") or lead.get("updated_at") or lead.get("created_at"))
+        if int(lead.get("score") or 0) > max_score or age is None or age < stale_hours:
+            skipped += 1
+            continue
+        await repo.update(lead["id"], {"stage": "lost", "lost_reason": reason, "updated_at": now_iso()})
+        await cancel_followups(lead["id"], reason=reason, workspace_id=ctx.workspace_id)
+        await events.emit(lead["id"], "lead.updated", {"stage": "lost", "reason": reason, "routine_id": ctx.routine["id"]}, workspace_id=ctx.workspace_id)
+        closed += 1
+    return {"closed": closed, "kept_active": skipped, "protected": protected}
+
+
+async def _rescore(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
+    from app.modules.agents.rescoring import rescore_leads
+
+    out = await rescore_leads([lead["id"] for lead in ctx.leads[:MAX_LEADS]], workspace_id=ctx.workspace_id, trigger=f"routine:{ctx.routine.get('name')}")
+    return {k: v for k, v in out.items() if k != "results"}
+
+
+async def _refresh_listings(ctx: RunContext, params: dict[str, Any]) -> dict[str, Any]:
+    """Mark listings not seen from any portal pull in ``stale_days`` as expired; report price moves."""
+    props = table("properties", ctx.workspace_id)
+    stale_days = float(params.get("stale_days") or 14)
+    rows = await props.select(limit=min(int(params.get("limit") or 2000), 5000))
+    expired = price_moves = active = 0
+    for p in rows:
+        if p.get("status") in ("expired", "sold", "rented"):
+            continue
+        seen = _hours_since(p.get("last_seen_at") or p.get("updated_at") or p.get("created_at"))
+        if seen is not None and seen > stale_days * 24 and p.get("source") not in (None, "", "manual", "demo"):
+            await props.update({"status": "expired", "expired_at": now_iso()}, id=p["id"])
+            expired += 1
+            continue
+        active += 1
+        prev, cur = p.get("previous_price_aed"), p.get("price_aed") or p.get("price")
+        if prev and cur and prev != cur:
+            price_moves += 1
+            ctx.issues.append({"property_id": p["id"], "issue": "price_change", "from": prev, "to": cur})
+    return {"active": active, "expired": expired, "price_changes": price_moves}
 
 
 async def _execute_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, Any]:
     t = step["type"]
     params = dict(step.get("params") or {})
-    if t.startswith("connector."):
+    if t.startswith("connector.") or t == "voice.send_note":
         return await _connector_step(ctx, step)
     if t == "leads.select":
         return await _select_leads(ctx, params)
@@ -658,6 +796,16 @@ async def _execute_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, Any]
         return await _create_tasks(ctx, params)
     if t == "job.run":
         return await _run_job(ctx, params)
+    if t == "analytics.query":
+        return await _analytics_query(ctx, params)
+    if t == "followups.schedule":
+        return await _schedule_followups(ctx, params)
+    if t == "leads.reject":
+        return await _reject_leads(ctx, params)
+    if t == "leads.rescore":
+        return await _rescore(ctx, params)
+    if t == "listings.refresh":
+        return await _refresh_listings(ctx, params)
     return {"error": f"unknown step {t}"}
 
 
@@ -833,6 +981,70 @@ TEMPLATES: list[dict[str, Any]] = [
             {"type": "listings.validate"},
             {"type": "llm.summarize", "params": {"focus": "weekly pipeline health, stale leads and listing hygiene"}},
             {"type": "connector.notify", "provider": "slack"},
+        ],
+    },
+    {
+        "id": "inbox_leads_to_crm",
+        "name": "Portal e-mails & Meta ads → CRM",
+        "category": "intake",
+        "description": "Every 15 minutes read Bayut / Dubizzle / Property Finder e-mails and Meta Lead Ads, extract structured leads, score them and push new ones to your CRM.",
+        "schedule": {"kind": "interval", "seconds": 900, "tz": "Asia/Dubai"},
+        "steps": [
+            {"type": "connector.pull_leads", "provider": "gmail"},
+            {"type": "connector.pull_leads", "provider": "meta_lead_ads"},
+            {"type": "leads.select", "params": {"created_within_hours": 1, "limit": 100}},
+            {"type": "leads.rescore"},
+            {"type": "connector.push_leads", "provider": "generic_crm"},
+        ],
+    },
+    {
+        "id": "voice_note_followup",
+        "name": "Voice-note follow-up for warm leads",
+        "category": "follow_up",
+        "description": "Each afternoon, warm leads quiet for 2 days get a personalised AI voice note on WhatsApp and a follow-up cadence.",
+        "schedule": {"kind": "daily", "at": "16:00", "tz": "Asia/Dubai"},
+        "steps": [
+            {"type": "leads.select", "params": {"band": "warm", "stale_hours": 48, "limit": 40}},
+            {"type": "llm.draft_message", "params": {"channel": "voice", "tone": "warm", "language": "auto"}},
+            {"type": "voice.send_note", "provider": "voice_notes"},
+            {"type": "followups.schedule"},
+        ],
+    },
+    {
+        "id": "auto_reject_silent",
+        "name": "Auto-close cold, silent leads",
+        "category": "hygiene",
+        "description": "Weekly: leads scored under 30 with no contact for 14 days are closed as lost and their follow-ups cancelled, keeping the pipeline honest.",
+        "schedule": {"kind": "weekly", "at": "09:00", "weekday": 0, "tz": "Asia/Dubai"},
+        "steps": [
+            {"type": "leads.select", "params": {"band": "cold", "stale_hours": 336, "limit": 500}},
+            {"type": "leads.reject", "params": {"max_score": 30, "stale_hours": 336}},
+            {"type": "connector.notify", "provider": "slack"},
+        ],
+    },
+    {
+        "id": "listing_refresh",
+        "name": "Listing refresh & price watch",
+        "category": "inventory",
+        "description": "Nightly: expire listings no portal has shown for 14 days and flag price changes so brokers re-pitch matching leads.",
+        "schedule": {"kind": "daily", "at": "23:00", "tz": "Asia/Dubai"},
+        "steps": [
+            {"type": "connector.pull_listings", "provider": "property_finder"},
+            {"type": "listings.refresh", "params": {"stale_days": 14}},
+            {"type": "llm.summarize", "params": {"focus": "expired listings and price moves worth telling leads about"}},
+        ],
+    },
+    {
+        "id": "palm_demand_digest",
+        "name": "Area demand digest",
+        "category": "analytics",
+        "description": "Monday morning: which areas are hottest this week and who is asking for Palm Jumeirah — e-mailed to the team.",
+        "schedule": {"kind": "weekly", "at": "08:00", "weekday": 0, "tz": "Asia/Dubai"},
+        "steps": [
+            {"type": "analytics.query", "params": {"question": "which areas are most in demand this week"}},
+            {"type": "analytics.query", "params": {"question": "who wants Palm Jumeirah", "limit": 10}},
+            {"type": "llm.summarize", "params": {"focus": "demand shifts and the leads to prioritise"}},
+            {"type": "connector.send_email", "provider": "gmail", "params": {"subject": "Weekly demand digest"}},
         ],
     },
     {
