@@ -35,6 +35,37 @@ COMMUNITIES: Dict[str, Dict[str, Any]] = {
 
 DEVELOPERS = ["Emaar", "DAMAC", "Nakheel", "Meraas", "Select Group", "Sobha", "Ellington"]
 
+# Stock exterior/interior photos keyed by property type so a villa never shows a tower.
+PHOTOS: Dict[str, List[str]] = {
+    "apartment": [
+        "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800",
+        "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800",
+        "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800",
+        "https://images.unsplash.com/photo-1536376072261-38c75010e6c9?w=800",
+        "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800",
+        "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800",
+    ],
+    "penthouse": [
+        "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800",
+        "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?w=800",
+        "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800",
+        "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=800",
+    ],
+    "villa": [
+        "https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800",
+        "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800",
+        "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=800",
+        "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=800",
+        "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=800",
+    ],
+    "townhouse": [
+        "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=800",
+        "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800",
+        "https://images.unsplash.com/photo-1605276374104-dee2a0ed3cd6?w=800",
+        "https://images.unsplash.com/photo-1583608205776-bfd35f0d9f83?w=800",
+    ],
+}
+
 AMENITY_POOL = [
     "Pool", "Gym", "Covered Parking", "Concierge", "Beach Access",
     "Smart Home", "Kids Play Area", "Landscaped Garden", "Sauna", "Padel Court",
@@ -86,10 +117,7 @@ def mock_property_records(count: int = 42) -> List[Dict[str, Any]]:
                 "bedrooms": beds,
                 "bathrooms": max(1, beds - 1),
                 "size_sqft": size,
-                "images": [
-                    "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800",
-                    "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800",
-                ],
+                "images": _rng(f"photos-{i}").sample(PHOTOS[ptype], k=2),
                 "map_lat": round(meta["lat"] + rng.uniform(-0.012, 0.012), 6),
                 "map_lng": round(meta["lng"] + rng.uniform(-0.012, 0.012), 6),
                 "amenities": rng.sample(AMENITY_POOL, k=4),

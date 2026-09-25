@@ -95,7 +95,7 @@ export default function PipelinePage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name, phone, area"
-            className="ui-input w-72 ps-9"
+            className="ui-input w-72 !ps-9"
           />
         </label>
         <select aria-label="Stage" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="ui-input">

@@ -43,7 +43,7 @@ export function LeadCard({ lead, children }: { lead: BrokerLeadSummary; children
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="tabular font-medium text-foreground">{formatBudget(lead)}</span>
         <span className="ui-badge bg-muted text-muted-foreground">{STAGE_LABELS[lead.stage] ?? lead.stage}</span>
-        {lead.timeline && <span>Timeline: {lead.timeline.replace(/_/g, " ")}</span>}
+        {lead.timeline && <span>Timeline: {lead.timeline.replace(/^(\d+)_(\d+)_/, "$1–$2 ").replace(/_/g, " ")}</span>}
         <span className="uppercase">{lead.language}</span>
         <span className="ms-auto flex items-center gap-1 text-muted-foreground/70">
           <Clock className="h-3 w-3" />
