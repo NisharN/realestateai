@@ -175,7 +175,7 @@ function Answer({ result, onAction, busy }: { result: AnalyticsResult; onAction:
                     <MessageSquareText className="h-3.5 w-3.5" />
                   </a>
                 )}
-                <Link href={`/cowork?tab=routines&template=voice_note_followup`} className="ui-btn-ghost ui-btn-sm" aria-label={`Voice note routine for ${l.name}`} title="Voice note">
+                <Link href={`/cowork/routines?template=voice_note_followup`} className="ui-btn-ghost ui-btn-sm" aria-label={`Voice note routine for ${l.name}`} title="Voice note">
                   <Mic className="h-3.5 w-3.5" />
                 </Link>
                 <Link href={`/broker/leads/${l.id}#viewing`} className="ui-btn-ghost ui-btn-sm" aria-label={`Book viewing for ${l.name}`} title="Book viewing">
@@ -220,7 +220,7 @@ function Answer({ result, onAction, busy }: { result: AnalyticsResult; onAction:
                 {a.label}
               </button>
             ))}
-          <Link href={`/cowork?tab=routines&new=1`} className="ui-btn-ghost ui-btn-sm">
+          <Link href={`/cowork/routines?new=1`} className="ui-btn-ghost ui-btn-sm">
             Make this a routine
           </Link>
         </div>

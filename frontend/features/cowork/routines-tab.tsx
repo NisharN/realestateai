@@ -608,7 +608,7 @@ function ConnectionPicker({ spec, connections, value, onChange }: { spec: Routin
     return (
       <p className="text-xs text-warning">
         No connection can do this yet.{" "}
-        <a href="/cowork?tab=connections" className="underline">
+        <a href="/cowork/connections" className="underline">
           Add one in Connections
         </a>
         .

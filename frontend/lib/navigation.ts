@@ -8,7 +8,10 @@ export interface NavigationItem {
     | "dashboard"
     | "broker"
     | "pipeline"
-    | "cowork"
+    | "connections"
+    | "crm"
+    | "routines"
+    | "insights"
     | "properties"
     | "market"
     | "automations"
@@ -33,7 +36,10 @@ const common: NavigationItem[] = [
   { href: "/broker/pipeline", label: "Pipeline", icon: "pipeline" },
   { href: "/properties", label: "Properties", icon: "properties" },
   { href: "/market", label: "Market", icon: "market" },
-  { href: "/cowork", label: "Operations", icon: "cowork" },
+  { href: "/cowork/connections", label: "Connections", icon: "connections" },
+  { href: "/cowork/crm", label: "CRM", icon: "crm" },
+  { href: "/cowork/routines", label: "Routines", icon: "routines" },
+  { href: "/cowork/insights", label: "Insights", icon: "insights" },
 ];
 
 export function navigationForRole(role: WorkspaceRole): NavigationItem[] {
