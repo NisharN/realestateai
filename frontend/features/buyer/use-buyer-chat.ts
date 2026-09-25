@@ -92,6 +92,38 @@ export function useBuyerChat(initialLanguage: Language = "en") {
     [push, t],
   );
 
+  const leadIdRef = useRef<string | null>(null);
+  leadIdRef.current = leadId;
+  const leadPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  /**
+   * Single registration path shared by typed messages, the intake form and the
+   * voice socket: concurrent callers await the same in-flight request so one
+   * displayed thread never maps to two backend leads.
+   */
+  const registerLead = useCallback(
+    (lang: Language, onError: (err: string) => string): Promise<string | null> => {
+      if (leadIdRef.current) return Promise.resolve(leadIdRef.current);
+      if (leadPromiseRef.current) return leadPromiseRef.current;
+      leadPromiseRef.current = (async () => {
+        const result = await leadsApi.ingest(toIngestInput(intake, lang));
+        if (result.error || !result.data) {
+          push(assistantMessage(onError(result.error ?? "unknown")));
+          return null;
+        }
+        const id = result.data.lead_id;
+        leadIdRef.current = id;
+        setLeadId(id);
+        setShowIntake(false);
+        return id;
+      })().finally(() => {
+        leadPromiseRef.current = null;
+      });
+      return leadPromiseRef.current;
+    },
+    [intake, push],
+  );
+
   const sendMessage = useCallback(
     async (text: string, propertyId?: string): Promise<boolean> => {
       const trimmed = text.trim();
@@ -101,39 +133,23 @@ export function useBuyerChat(initialLanguage: Language = "en") {
       push({ id: nextId(), role: "user", content: trimmed, timestamp: new Date() });
       setIsLoading(true);
       try {
-        if (!leadId) {
-          const ingest = await leadsApi.ingest(toIngestInput(intake, lang));
-          if (!ingest.data) {
-            push(assistantMessage(t.backendError(ingest.error ?? "unknown")));
-            return false;
-          }
-          const id = ingest.data.lead_id;
-          setLeadId(id);
-          setShowIntake(false);
-          await continueChat(id, trimmed);
-          return true;
-        }
-        await continueChat(leadId, trimmed, propertyId);
+        const id = await registerLead(lang, t.backendError);
+        if (!id) return false;
+        await continueChat(id, trimmed, propertyId);
         return true;
       } finally {
         setIsLoading(false);
       }
     },
-    [continueChat, intake, isLoading, language, leadId, push, t],
+    [continueChat, isLoading, language, push, registerLead, t],
   );
 
   const submitIntake = useCallback(
     async (firstMessage: string) => {
       setIsLoading(true);
       try {
-        const result = await leadsApi.ingest(toIngestInput(intake, language));
-        if (result.error || !result.data) {
-          push(assistantMessage(t.registerError(result.error ?? "unknown")));
-          return;
-        }
-        const id = result.data.lead_id;
-        setLeadId(id);
-        setShowIntake(false);
+        const id = await registerLead(language, t.registerError);
+        if (!id) return;
         if (firstMessage.trim()) {
           push({ id: nextId(), role: "user", content: firstMessage.trim(), timestamp: new Date() });
           await continueChat(id, firstMessage.trim());
@@ -144,33 +160,14 @@ export function useBuyerChat(initialLanguage: Language = "en") {
         setIsLoading(false);
       }
     },
-    [continueChat, intake, language, push, t],
+    [continueChat, language, push, registerLead, t],
   );
 
-  const leadIdRef = useRef<string | null>(null);
-  leadIdRef.current = leadId;
-  const leadPromiseRef = useRef<Promise<string | null> | null>(null);
-
   /** Lead the voice socket binds to; registers one from the intake form on first use. */
-  const ensureLead = useCallback(async (): Promise<string | null> => {
-    if (leadIdRef.current) return leadIdRef.current;
-    if (leadPromiseRef.current) return leadPromiseRef.current;
-    leadPromiseRef.current = (async () => {
-      const result = await leadsApi.ingest(toIngestInput(intake, language));
-      if (result.error || !result.data) {
-        push(assistantMessage(t.registerError(result.error ?? "unknown")));
-        return null;
-      }
-      const id = result.data.lead_id;
-      leadIdRef.current = id;
-      setLeadId(id);
-      setShowIntake(false);
-      return id;
-    })().finally(() => {
-      leadPromiseRef.current = null;
-    });
-    return leadPromiseRef.current;
-  }, [intake, language, push, t]);
+  const ensureLead = useCallback(
+    (): Promise<string | null> => registerLead(language, t.registerError),
+    [language, registerLead, t],
+  );
 
   const onVoiceTranscript = useCallback(
     (text: string) => {

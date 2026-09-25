@@ -23,6 +23,11 @@ export function browserTtsAvailable(lang: "en" | "ar"): boolean {
   return voices.some((v) => v.lang.toLowerCase().startsWith(prefix));
 }
 
+/** Generous upper bound for how long an utterance may take (~4 chars/s + slack). */
+export function speechBudgetMs(text: string): number {
+  return Math.min(120_000, 8_000 + text.length * 250);
+}
+
 /**
  * Plays one reply at a time. Server audio first; browser TTS as fallback.
  * Every path (ended, error, no voices, stop()) settles exactly once via
@@ -120,6 +125,12 @@ export class PlaybackQueue {
     if (voice) u.voice = voice;
     u.onstart = () => {
       this.clearWatchdog();
+      // Engines can stall after onstart without ever firing onend/onerror.
+      this.watchdog = setTimeout(() => {
+        if (this.settled) return;
+        window.speechSynthesis.cancel();
+        this.finish({ code: "tts_failed", detail: "synthesis did not finish" });
+      }, speechBudgetMs(item.text));
       this.cb.onStart();
     };
     u.onend = () => this.finish();

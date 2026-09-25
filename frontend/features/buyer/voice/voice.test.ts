@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PlaybackQueue } from "./playback";
-import { blobToBase64, mapMicError, pickMimeType } from "./recorder";
+import { PlaybackQueue, speechBudgetMs } from "./playback";
+import { blobToBase64, mapMicError, MicRecorder, pickMimeType } from "./recorder";
 
 class FakeUtterance {
   text: string;
@@ -14,7 +14,7 @@ class FakeUtterance {
   }
 }
 
-function installSpeech(voices: { lang: string }[], behaviour: "ok" | "error" | "silent") {
+function installSpeech(voices: { lang: string }[], behaviour: "ok" | "error" | "silent" | "stall") {
   const spoken: FakeUtterance[] = [];
   const synth = {
     speaking: false,
@@ -27,6 +27,9 @@ function installSpeech(voices: { lang: string }[], behaviour: "ok" | "error" | "
         setTimeout(() => u.onend?.(), 0);
       } else if (behaviour === "error") {
         setTimeout(() => u.onerror?.({ error: "synthesis-failed" }), 0);
+      } else if (behaviour === "stall") {
+        synth.speaking = true;
+        u.onstart?.();
       }
     },
   };
@@ -112,5 +115,41 @@ describe("PlaybackQueue browser fallback", () => {
     new PlaybackQueue(cb).play({ text: "x", lang: "en" });
     vi.advanceTimersByTime(4100);
     expect(cb.onError).toHaveBeenCalledWith(expect.objectContaining({ code: "tts_failed" }));
+  });
+
+  it("completion watchdog settles an utterance that starts but never ends", () => {
+    vi.useFakeTimers();
+    const { synth } = installSpeech([{ lang: "en-GB" }], "stall");
+    const cb = { onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() };
+    new PlaybackQueue(cb).play({ text: "hello there", lang: "en" });
+    expect(cb.onStart).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(speechBudgetMs("hello there") - 1);
+    expect(cb.onError).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(synth.cancel).toHaveBeenCalled();
+    expect(cb.onError).toHaveBeenCalledWith(expect.objectContaining({ code: "tts_failed", detail: "synthesis did not finish" }));
+    expect(cb.onEnd).not.toHaveBeenCalled();
+  });
+});
+
+describe("MicRecorder start cancellation", () => {
+  it("does not activate a microphone granted after stop()", async () => {
+    const tracks = [{ stop: vi.fn() }];
+    let grant: (s: unknown) => void = () => undefined;
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: () => new Promise((resolve) => (grant = resolve)),
+      },
+    });
+    vi.stubGlobal("MediaRecorder", Object.assign(vi.fn(), { isTypeSupported: () => true }));
+    const cb = { onUtterance: vi.fn(), onError: vi.fn() };
+    const rec = new MicRecorder(() => ({ audio_formats: ["audio/webm"], max_utterance_s: 30, vad_silence_ms: 900, vad_threshold: 0.01 }) as never, cb);
+    const started = rec.start();
+    rec.stop();
+    grant({ getTracks: () => tracks });
+    expect(await started).toBe(false);
+    expect(tracks[0].stop).toHaveBeenCalled();
+    expect(rec.active).toBe(false);
+    expect(cb.onError).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.services.voice_service import VoiceService
 
 
@@ -34,30 +34,13 @@ class VoiceConfig(BaseModel):
     faults: list[str]
 
 
-def _stt_provider(settings: Settings, voice: VoiceService) -> str:
-    wanted = settings.VOICE_STT_PROVIDER.lower()
-    if wanted == "none" or settings.FAULT_STT:
-        return "none"
-    if wanted in {"groq", "auto"} and voice.groq_client is not None:
-        return "groq"
-    if wanted in {"huggingface", "auto"} and voice.huggingface_client is not None:
-        return "huggingface"
-    return "none"
-
-
-def _tts_provider(settings: Settings, voice: VoiceService, language: str) -> str:
-    wanted = settings.VOICE_TTS_PROVIDER.lower()
-    if wanted == "none":
-        return "none"
-    if wanted in {"piper", "auto"} and not settings.FAULT_TTS and voice.tts_available(language):
-        return "piper"
-    return "browser"
-
-
 def build_voice_config(voice: VoiceService, language: str = "en") -> VoiceConfig:
+    """Advertised providers come from the same VoiceService helpers that gate
+    transcription and synthesis, so config and behaviour cannot diverge."""
     settings = get_settings()
-    stt = _stt_provider(settings, voice)
-    tts = _tts_provider(settings, voice, language)
+    providers = voice.stt_providers()
+    stt = providers[0] if providers else "none"
+    tts = voice.tts_provider(language)
     faults = [name for name, on in (("stt", settings.FAULT_STT), ("tts", settings.FAULT_TTS)) if on]
     return VoiceConfig(
         providers=VoiceProviders(stt=stt, tts=tts, stt_available=stt != "none", tts_available=tts != "none"),

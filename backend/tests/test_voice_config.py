@@ -104,3 +104,53 @@ def test_area_ranking_uses_only_communities_with_rent_and_sale_samples():
     assert "downtown_dubai" not in ids
     jvc = next(a for a in ranking.areas if a.community_id == "jvc")
     assert jvc.gross_yield_pct == 8.0
+
+
+def test_disabled_stt_provider_is_enforced_not_just_advertised(monkeypatch):
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "none")
+    get_settings.cache_clear()
+    svc = VoiceService()
+    svc.groq_client = object()  # configured, but must not be called
+    assert svc.stt_providers() == []
+    result = asyncio.run(svc.transcribe(b"RIFF....WAVE", "en", mime="audio/wav"))
+    assert result.provider is None
+    assert "disabled" in (result.error or "")
+    assert build_voice_config(svc, "en").providers.stt == "none"
+
+
+def test_explicit_stt_provider_skips_other_clients(monkeypatch):
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "huggingface")
+    get_settings.cache_clear()
+    svc = VoiceService()
+    svc.groq_client = object()
+    svc.huggingface_client = None
+    assert svc.stt_providers() == []
+    svc.huggingface_client = object()
+    assert svc.stt_providers() == ["huggingface"]
+
+
+def test_disabled_tts_provider_skips_piper(monkeypatch):
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "none")
+    get_settings.cache_clear()
+    svc = VoiceService()
+    svc._piper_model = lambda language: "/fake/model.onnx"  # type: ignore[method-assign]
+    assert svc.tts_provider("en") == "none"
+    assert asyncio.run(svc.text_to_speech("hello", "en")) is None
+
+
+def test_area_ranking_samples_sale_and_rent_independently():
+    ws_id = get_settings().WORKSPACE_ID
+    repo = get_property_repository(ws_id)
+
+    async def seed():
+        for i in range(area_ranking.SAMPLE_LIMIT + 5):
+            await repo.create({"title": f"r{i}", "area": "Jumeirah Village Circle", "price": 80_000, "listing_type": "rent", "property_type": "apartment", "bedrooms": 1})
+        for i in range(3):
+            await repo.create({"title": f"s{i}", "area": "Jumeirah Village Circle", "price": 1_000_000, "listing_type": "sale", "property_type": "apartment", "bedrooms": 1})
+        return await area_ranking.area_ranking(ws_id)
+
+    ranking = asyncio.run(seed())
+    jvc = next(a for a in ranking.areas if a.community_id == "jvc")
+    assert jvc.sale_samples >= 3
+    assert jvc.rent_samples == area_ranking.SAMPLE_LIMIT
+    assert jvc.gross_yield_pct == 8.0

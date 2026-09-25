@@ -109,16 +109,46 @@ class VoiceService:
         self.piper_path = self.settings.PIPER_MODEL_PATH
         self.piper_binary = shutil.which("piper")
 
+    # ------------------------------------------------------------- providers
+    def stt_providers(self) -> list[str]:
+        """Effective STT providers in fallback order, honouring VOICE_STT_PROVIDER."""
+        wanted = self.settings.VOICE_STT_PROVIDER.lower()
+        if wanted == "none" or self.settings.FAULT_STT:
+            return []
+        order: list[str] = []
+        if wanted in {"groq", "auto"} and self.groq_client is not None:
+            order.append("groq")
+        if wanted in {"huggingface", "auto"} and self.huggingface_client is not None:
+            order.append("huggingface")
+        return order
+
+    def tts_provider(self, language: str = "en") -> str:
+        """Effective TTS provider: piper | browser | none, honouring VOICE_TTS_PROVIDER."""
+        wanted = self.settings.VOICE_TTS_PROVIDER.lower()
+        if wanted == "none":
+            return "none"
+        if wanted in {"piper", "auto"} and not self.settings.FAULT_TTS and self.tts_available(language):
+            return "piper"
+        return "browser"
+
     # ------------------------------------------------------------------ STT
     async def transcribe(self, audio_bytes: bytes, language: str = "en", *, mime: str = "") -> Transcript:
         if not audio_bytes:
             return Transcript(text="", provider=None, error="empty audio")
         if self.settings.FAULT_STT:
             return Transcript(text="", provider=None, error="fault injection: FAULT_STT")
+        providers = self.stt_providers()
+        if not providers:
+            reason = (
+                "STT disabled by configuration"
+                if self.settings.VOICE_STT_PROVIDER.lower() == "none"
+                else "no STT provider configured"
+            )
+            return Transcript(text="", provider=None, error=reason)
         timeout = self.settings.STT_TIMEOUT_S
         last_error: str | None = None
 
-        if self.groq_client:
+        if "groq" in providers:
             try:
                 self.last_confidence = None
                 text = await asyncio.wait_for(self._groq_stt(audio_bytes, language, mime), timeout=timeout)
@@ -127,7 +157,7 @@ class VoiceService:
                 last_error = f"groq: {exc}"
                 logger.warning("Groq STT failed; trying fallback: %s", exc)
 
-        if self.huggingface_client:
+        if "huggingface" in providers:
             try:
                 text = await asyncio.wait_for(self._hf_stt(audio_bytes), timeout=timeout)
                 return Transcript(text=text, provider="huggingface")
@@ -186,7 +216,7 @@ class VoiceService:
 
         Callers must treat ``None`` as "use browser speech synthesis".
         """
-        if not text or self.settings.FAULT_TTS:
+        if not text or self.tts_provider(language) != "piper":
             return None
         model_path = self._piper_model(language)
         if model_path is None:
