@@ -69,8 +69,8 @@ export function useBuyerChat(initialLanguage: Language = "en") {
   const push = useCallback((m: Message) => setMessages((prev) => [...prev, m]), []);
 
   const continueChat = useCallback(
-    async (id: string, text: string) => {
-      const result = await leadsApi.sendMessage(id, { text });
+    async (id: string, text: string, propertyId?: string) => {
+      const result = await leadsApi.sendMessage(id, propertyId ? { text, property_id: propertyId } : { text });
       if (result.error || !result.data) {
         push(assistantMessage(t.backendError(result.error ?? "unknown")));
         return;
@@ -93,9 +93,9 @@ export function useBuyerChat(initialLanguage: Language = "en") {
   );
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, propertyId?: string): Promise<boolean> => {
       const trimmed = text.trim();
-      if (!trimmed || isLoading) return;
+      if (!trimmed || isLoading) return false;
       const lang = detectLanguage(trimmed) === "ar" ? "ar" : language;
       if (lang !== language) setLanguageState(lang);
       push({ id: nextId(), role: "user", content: trimmed, timestamp: new Date() });
@@ -105,15 +105,16 @@ export function useBuyerChat(initialLanguage: Language = "en") {
           const ingest = await leadsApi.ingest(toIngestInput(intake, lang, trimmed));
           if (!ingest.data) {
             push(assistantMessage(t.backendError(ingest.error ?? "unknown")));
-            return;
+            return false;
           }
           const id = ingest.data.lead_id;
           setLeadId(id);
           setShowIntake(false);
           await continueChat(id, trimmed);
-          return;
+          return true;
         }
-        await continueChat(leadId, trimmed);
+        await continueChat(leadId, trimmed, propertyId);
+        return true;
       } finally {
         setIsLoading(false);
       }

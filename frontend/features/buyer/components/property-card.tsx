@@ -18,12 +18,14 @@ export function PropertyCard({
   lang,
   onViewMap,
   onAsk,
+  busy = false,
 }: {
   property: Property;
   t: Strings;
   lang: Language;
   onViewMap: (p: Property) => void;
-  onAsk: (text: string) => void;
+  onAsk: (text: string, propertyId: string) => Promise<boolean>;
+  busy?: boolean;
 }) {
   const [imageBroken, setImageBroken] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
@@ -50,11 +52,11 @@ export function PropertyCard({
           type="button"
           aria-pressed={isLiked}
           aria-label={t.likeThis(property.title)}
-          onClick={() => {
-            if (!isLiked) onAsk(t.likeThis(property.title));
-            setIsLiked(!isLiked);
+          disabled={busy || isLiked}
+          onClick={async () => {
+            if (await onAsk(t.likeThis(property.title), property.id)) setIsLiked(true);
           }}
-          className="absolute top-3 end-3 p-2 bg-card/90 backdrop-blur rounded-full hover:bg-card transition"
+          className="absolute top-3 end-3 p-2 bg-card/90 backdrop-blur rounded-full hover:bg-card transition disabled:cursor-default"
         >
           <Heart className={cn("w-4 h-4", isLiked ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
         </button>
@@ -120,8 +122,9 @@ export function PropertyCard({
             </button>
             <button
               type="button"
-              onClick={() => onAsk(t.askAboutText(property.title))}
-              className="px-3 py-1.5 bg-brand text-brand-foreground text-xs font-medium rounded-lg hover:opacity-90 transition"
+              disabled={busy}
+              onClick={() => void onAsk(t.askAboutText(property.title), property.id)}
+              className="px-3 py-1.5 bg-brand text-brand-foreground text-xs font-medium rounded-lg hover:opacity-90 transition disabled:opacity-40"
             >
               {t.askAbout}
             </button>

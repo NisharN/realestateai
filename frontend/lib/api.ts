@@ -151,7 +151,7 @@ export const leadsApi = {
 
   getById: (id: string) => fetchApi<ApiLead>(`/api/v1/leads/${id}`),
 
-  sendMessage: (id: string, message: { text: string }) =>
+  sendMessage: (id: string, message: { text: string; property_id?: string }) =>
     fetchApi<LeadMessageResponse>(`/api/v1/leads/${id}/message`, {
       method: "POST",
       body: JSON.stringify(message),

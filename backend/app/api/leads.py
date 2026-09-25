@@ -167,6 +167,7 @@ class MessageRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     idempotency_key: Optional[str] = Field(None, max_length=128)
     channel: str = "chat"
+    property_id: Optional[str] = Field(None, max_length=64)
 
 
 class MessageResponse(BaseModel):
@@ -230,6 +231,7 @@ async def send_message(
         channel=message.channel if message.channel in {"chat", "widget", "whatsapp", "voice"} else "chat",
         idempotency_key=message.idempotency_key,
         source=lead.get("source"),
+        property_id=message.property_id,
     )
     await lead_repo.update(lead_id, {"last_contact_at": datetime.utcnow().isoformat()})
     return _message_response(lead_id, result)

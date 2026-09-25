@@ -14,12 +14,14 @@ function MessageBubble({
   lang,
   onViewMap,
   onAsk,
+  busy,
 }: {
   message: Message;
   t: Strings;
   lang: Language;
   onViewMap: (p: Property, all: Property[]) => void;
-  onAsk: (text: string) => void;
+  onAsk: (text: string, propertyId: string) => Promise<boolean>;
+  busy: boolean;
 }) {
   const isUser = message.role === "user";
   const lines = message.content.split("\n");
@@ -69,6 +71,7 @@ function MessageBubble({
                 lang={lang}
                 onViewMap={(p) => onViewMap(p, message.properties || [])}
                 onAsk={onAsk}
+                busy={busy}
               />
             ))}
           </div>
@@ -95,7 +98,7 @@ export function MessageList({
   t: Strings;
   lang: Language;
   onViewMap: (p: Property, all: Property[]) => void;
-  onAsk: (text: string) => void;
+  onAsk: (text: string, propertyId: string) => Promise<boolean>;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -106,7 +109,7 @@ export function MessageList({
     <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4" role="log" aria-live="polite">
       <AnimatePresence>
         {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} t={t} lang={lang} onViewMap={onViewMap} onAsk={onAsk} />
+          <MessageBubble key={m.id} message={m} t={t} lang={lang} onViewMap={onViewMap} onAsk={onAsk} busy={isLoading} />
         ))}
       </AnimatePresence>
 
