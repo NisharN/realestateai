@@ -20,13 +20,13 @@ export function formatBudget(lead: Pick<BrokerLeadSummary, "budget_min_aed" | "b
 export function bandTone(band: string | null | undefined): string {
   switch (band) {
     case "hot":
-      return "bg-red-100 text-red-700";
+      return "bg-danger-soft text-danger";
     case "warm":
-      return "bg-amber-100 text-amber-700";
+      return "bg-warning-soft text-warning";
     case "cold":
-      return "bg-slate-100 text-slate-600";
+      return "bg-brand/10 text-brand";
     default:
-      return "bg-slate-100 text-slate-500";
+      return "bg-muted text-muted-foreground";
   }
 }
 

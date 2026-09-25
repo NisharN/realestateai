@@ -5,7 +5,7 @@ import { navigationForRole } from "./navigation";
 describe("navigationForRole", () => {
   it("hides administration from agents", () => {
     const hrefs = navigationForRole("agent").map((item) => item.href);
-    expect(hrefs).toEqual(["/", "/dashboard", "/broker", "/properties", "/market", "/automations"]);
+    expect(hrefs).toEqual(["/", "/dashboard", "/broker", "/broker/pipeline", "/properties", "/market", "/automations"]);
     expect(hrefs).not.toContain("/admin/ingestion");
     expect(hrefs).not.toContain("/configure");
     expect(hrefs).not.toContain("/members");
