@@ -72,6 +72,13 @@ curl -s localhost:8000/health | jq
 `/health` reports each dependency as `configured` or `mock`; a live instance
 must show no `mock` entries.
 
+### Demo / stress data (mock mode only)
+
+`DEMO_SEED_SCALE=100000` adds ~100k deterministic leads, ~25k listings and
+linked handoffs/viewings/follow-ups on top of the hand-written seed at startup
+(~3 s, ~450 MB RSS). It is ignored whenever a Supabase datastore is configured,
+so it cannot leak into a live workspace. Leave it unset (0) for tests.
+
 ## 4. First-run checklist
 
 1. Invite the owner via the admin UI (Supabase auth email).

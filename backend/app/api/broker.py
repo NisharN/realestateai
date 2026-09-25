@@ -12,11 +12,11 @@ from app.database import get_lead_repository
 from app.modules.conversation.repository import ConversationRepo
 from app.modules.handoff import followups, viewings
 from app.modules.handoff.service import accept_handoff, decline_handoff, reassign_stale
+from app.modules.leads.stages import PIPELINE_STAGES, lead_stage
 from app.modules.store import new_id, now_iso, table
 
 router = APIRouter()
 
-PIPELINE_STAGES: tuple[str, ...] = ("new", "qualifying", "qualified", "handed_off", "viewing_booked", "offer", "closed", "lost", "opted_out")
 MIRROR_ONLY = ("updated_at", "broker_edited_fields", "budget_min", "budget_max", "property_type")
 BROKER_EDITABLE = ("purpose", "budget_min_aed", "budget_max_aed", "budget_period", "community_ids", "property_types", "bedrooms_min", "timeline", "payment", "stage", "notes", "first_name", "last_name", "email")
 
@@ -34,12 +34,7 @@ def _visible(context: RequestContext, lead: dict[str, Any]) -> bool:
     return context.role != WorkspaceRole.AGENT or (context.broker_id is not None and lead.get("assigned_broker") == context.broker_id)
 
 
-def _lead_stage(lead: dict[str, Any]) -> str:
-    stage = lead.get("stage")
-    if stage in PIPELINE_STAGES:
-        return stage
-    status = lead.get("status")
-    return {"contacted": "handed_off", "new": "new", "qualified": "qualified"}.get(status or "", "new")
+_lead_stage = lead_stage
 
 
 def _summary(lead: dict[str, Any]) -> dict[str, Any]:
@@ -85,8 +80,7 @@ async def broker_today(broker_id: str | None = None, context: RequestContext = D
             out.append({"handoff": _handoff_public(h), "lead": _summary(lead) if lead else {"id": h["lead_id"]}})
         return out
 
-    leads = [l for l in await repo.list_all(limit=500) if not scope or l.get("assigned_broker") == scope]
-    hot = sorted((l for l in leads if (l.get("band") == "hot" or (l.get("intent_score") or 0) >= 70) and _lead_stage(l) not in ("closed", "lost", "opted_out")), key=lambda l: -(l.get("score") or l.get("intent_score") or 0))
+    hot = await repo.list_hot(min_score=70, limit=200, assigned_broker_id=scope)
     upcoming = await viewings.list_viewings(ws, broker_id=scope, statuses=["requested", "confirmed"], limit=50)
 
     return {
@@ -112,13 +106,19 @@ async def broker_today(broker_id: str | None = None, context: RequestContext = D
 @router.get("/pipeline")
 async def pipeline(broker_id: str | None = None, context: RequestContext = Depends(get_request_context)):
     scope = _broker_scope(context, broker_id)
-    leads = [l for l in await get_lead_repository(context.workspace_id).list_all(limit=1000) if not scope or l.get("assigned_broker") == scope]
+    repo = get_lead_repository(context.workspace_id)
+    leads = await repo.list_all(limit=1000, assigned_broker_id=scope)
+    totals = await repo.count_by_stage(assigned_broker_id=scope)
     columns: dict[str, list[dict[str, Any]]] = {s: [] for s in PIPELINE_STAGES}
     for l in leads:
         columns[_lead_stage(l)].append(_summary(l))
     for rows in columns.values():
         rows.sort(key=lambda s: -(s["score"] or 0))
-    return {"broker_id": scope, "stages": [{"stage": s, "count": len(columns[s]), "leads": columns[s][:100]} for s in PIPELINE_STAGES]}
+    return {
+        "broker_id": scope,
+        "total": sum(totals.values()),
+        "stages": [{"stage": s, "count": totals.get(s, len(columns[s])), "leads": columns[s][:100]} for s in PIPELINE_STAGES],
+    }
 
 
 @router.get("/leads/{lead_id}")

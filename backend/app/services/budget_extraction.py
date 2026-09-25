@@ -79,6 +79,7 @@ NON_MONEY_UNIT = re.compile(
     re.I,
 )
 # Numbers preceded by these are labels, not money: "floor 20", "tower 3", "no. 4".
+NON_MONEY_PREFIX_MAX = 10_000  # unit/floor/tower numbers are small; prices are not
 NON_MONEY_PREFIX = re.compile(
     r"(floor|level|tower|building|unit|apt|apartment|villa|no\.?|#|طابق|برج|رقم)\s*$",
     re.I,
@@ -149,14 +150,13 @@ def _parse_amounts(text: str) -> list[float]:
         trailing = text[match.end():]
         if not suffix and NON_MONEY_UNIT.match(trailing):
             continue  # "2 bed", "1200 sqft" — describing the property
-        if not suffix and NON_MONEY_PREFIX.search(text[: match.start()]):
-            continue  # "floor 20", "tower 3"
-
         raw = match.group("num").replace(",", "")
         try:
             value = float(raw)
         except ValueError:
             continue
+        if not suffix and value < NON_MONEY_PREFIX_MAX and NON_MONEY_PREFIX.search(text[: match.start()]):
+            continue  # "floor 20", "tower 3", "villa 12" — but not "villa 1,500,000"
 
         if suffix:
             scaled.append(value * SUFFIX_MULTIPLIER.get(suffix, 1))

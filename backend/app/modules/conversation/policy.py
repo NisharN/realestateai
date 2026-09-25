@@ -80,7 +80,7 @@ def decide(state: ConversationState, facts: ExtractedFacts) -> Decision:
             return Decision(Move.ASK_NEXT_FIELD, 9, field=field, reason=f"missing {', '.join(missing)}")
 
     # 10 — everything needed is known: show inventory.
-    if not missing and (not state.shortlist or state.last_shortlist_rejected()):
+    if not missing and (not state.shortlist or state.last_shortlist_rejected() or state.shortlist_is_stale()):
         if state.asked.get("suggest_empty", 0) >= 2 and state.stage != "confirming":
             return Decision(Move.CONFIRM_HANDOFF, 10, reason="no inventory twice; offer specialist search")
         return Decision(Move.SUGGEST, 10, reason="required slots known")

@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     VOICE_HEARTBEAT_S: float = 10.0
     HANDOFF_REASSIGN_MINUTES: int = 15
 
+    # --- Demo data (mock mode only) ---
+    # Extra deterministic leads/listings/viewings/follow-ups generated on top of
+    # the hand-written seed. 0 keeps tests fast; 100000 is the stress-test demo.
+    DEMO_SEED_SCALE: int = 0
+
     # --- PDPL retention (architecture §15) ---
     RETENTION_RAW_DAYS: int = 90        # raw connector payloads
     RETENTION_LEAD_DAYS: int = 730      # idle, unconverted, unassigned leads

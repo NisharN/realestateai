@@ -87,3 +87,9 @@ def test_arabic_room_count_is_not_treated_as_budget():
 def test_floor_number_is_not_treated_as_budget():
     result = extract_budget("apartment on floor 20, budget 1.5m")
     assert result.amount_max == 1_500_000
+
+
+def test_property_type_before_price_is_still_a_budget():
+    assert extract_budget("villa 1,500,000 AED").amount_max == 1_500_000
+    assert extract_budget("apartment 2,000,000 to buy").amount_max == 2_000_000
+    assert extract_budget("villa 12, budget 3m").amount_max == 3_000_000

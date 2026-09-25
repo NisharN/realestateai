@@ -6,6 +6,9 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.modules.leads.stages import CLOSED_STAGES, lead_stage
+from app.services.dashboard import summarize_leads
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -146,6 +149,34 @@ def load_seed_data() -> Dict[str, int]:
     return {"properties": len(_properties), "leads": len(_leads)}
 
 
+def load_scale_data(scale: int, tables: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
+    """Add ``scale`` generated leads and listings, plus handoffs/viewings/follow-ups
+    into ``tables`` (the generic in-memory tables). Mock mode only; called from the
+    app lifespan once ``DEMO_SEED_SCALE`` is set. Idempotent per process."""
+    from app.config import get_settings
+    from app.demo_scale import scale_leads, scale_properties, scale_related
+
+    workspace_id = get_settings().WORKSPACE_ID
+    for record in scale_properties(max(50, scale // 4)):
+        record["workspace_id"] = workspace_id
+        _properties[record["id"]] = record
+
+    generated = list(scale_leads(scale))
+    for record in generated:
+        record["workspace_id"] = workspace_id
+        _leads[record["id"]] = record
+
+    related = scale_related(generated)
+    for name, rows in related.items():
+        existing = tables[name]
+        existing[:] = [r for r in existing if not str(r.get("id", "")).startswith("scale-")]
+        for row in rows:
+            row["workspace_id"] = workspace_id
+        existing.extend(rows)
+
+    return {"properties": len(_properties), "leads": len(_leads), **{k: len(v) for k, v in related.items()}}
+
+
 load_seed_data()
 
 
@@ -189,10 +220,36 @@ class MockLeadRepository:
                 return deepcopy(lead)
         return None
 
-    async def list_all(self, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
-        items = [l for l in _leads.values() if l.get("workspace_id") == self.workspace_id]
+    def _mine(self, assigned_broker_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return [
+            l for l in _leads.values()
+            if l.get("workspace_id") == self.workspace_id
+            and (assigned_broker_id is None or l.get("assigned_broker") == assigned_broker_id)
+        ]
+
+    async def list_all(self, limit: int = 200, offset: int = 0, assigned_broker_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        items = self._mine(assigned_broker_id)
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return [deepcopy(l) for l in items[offset : offset + limit]]
+
+    async def list_hot(self, min_score: int = 70, limit: int = 50, assigned_broker_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        items = [
+            l for l in self._mine(assigned_broker_id)
+            if (l.get("band") == "hot" or (l.get("intent_score") or 0) >= min_score)
+            and lead_stage(l) not in CLOSED_STAGES
+        ]
+        items.sort(key=lambda x: (-(x.get("score") or x.get("intent_score") or 0), x.get("created_at", "")), reverse=False)
+        return [deepcopy(l) for l in items[:limit]]
+
+    async def count_by_stage(self, assigned_broker_id: Optional[str] = None) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for l in self._mine(assigned_broker_id):
+            stage = lead_stage(l)
+            counts[stage] = counts.get(stage, 0) + 1
+        return counts
+
+    async def summary(self, assigned_broker_id: Optional[str] = None) -> Dict[str, Any]:
+        return summarize_leads(self._mine(assigned_broker_id))
 
     async def update(self, lead_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if lead_id not in _leads or _leads[lead_id].get("workspace_id") != self.workspace_id:

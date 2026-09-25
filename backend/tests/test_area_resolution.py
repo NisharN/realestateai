@@ -21,3 +21,9 @@ def test_separate_mentions_are_all_kept():
 def test_arabic_digit_room_count():
     assert _bedrooms("شقة 3 غرف") == 3
     assert _bedrooms("غرفتين") == 2
+
+
+def test_shared_alias_resolves_to_canonical_community():
+    assert _ids("villa in deira islands") == ["dubai_islands"]
+    assert _ids("apartment in deira") == ["deira"]
+    assert _ids("townhouse in dubailand") == ["dubai_land"]

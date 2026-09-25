@@ -16,6 +16,7 @@ SlotSource = Literal["import", "buyer", "broker", "inferred"]
 
 REQUIRED_SLOTS: tuple[str, ...] = ("purpose", "budget", "area", "property_type")
 QUALIFICATION_SLOTS: tuple[str, ...] = REQUIRED_SLOTS + ("timeline",)
+SEARCH_SLOTS: tuple[str, ...] = ("purpose", "budget", "area", "property_type", "bedrooms")
 
 # Priority order for ask_next_field (one field per turn).
 ASK_ORDER: tuple[str, ...] = ("purpose", "budget", "area", "property_type", "bedrooms", "timeline", "payment")
@@ -97,6 +98,17 @@ class ConversationState(BaseModel):
             return []
         last_turn = max(p.shown_turn for p in self.shortlist)
         return [p for p in self.shortlist if p.shown_turn == last_turn]
+
+    def shortlist_is_stale(self) -> bool:
+        """True when a search-relevant slot changed after the last shortlist was shown."""
+        current = self.current_shortlist()
+        if not current:
+            return False
+        shown = current[0].shown_turn
+        return any(
+            (s := self.profile.get(name)) is not None and s.updated_turn > shown
+            for name in SEARCH_SLOTS
+        )
 
     def last_shortlist_rejected(self) -> bool:
         current = self.current_shortlist()

@@ -9,6 +9,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.config import get_settings
+from app.services.dashboard import summarize_leads
+from app.modules.leads.stages import CLOSED_STAGES, LEGACY_STATUS_STAGE, PIPELINE_STAGES
 from app.mock_store import (
     MockActivityRepository,
     MockBrokerRepository,
@@ -160,15 +162,59 @@ class LeadRepository:
         result = self.table.select("*").eq("workspace_id", self.workspace_id).ilike("email", email).limit(1).execute()
         return result.data[0] if result.data else None
 
-    async def list_all(self, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
-        result = (
-            self.table.select("*")
-            .eq("workspace_id", self.workspace_id)
-            .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
+    async def list_all(self, limit: int = 200, offset: int = 0, assigned_broker_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        query = self.table.select("*").eq("workspace_id", self.workspace_id)
+        if assigned_broker_id:
+            query = query.eq("assigned_broker", assigned_broker_id)
+        result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
         return result.data or []
+
+    async def list_hot(self, min_score: int = 70, limit: int = 50, assigned_broker_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Highest-intent open leads, newest first within a score."""
+        query = self.table.select("*").eq("workspace_id", self.workspace_id).gte("intent_score", min_score)
+        if assigned_broker_id:
+            query = query.eq("assigned_broker", assigned_broker_id)
+        result = query.order("intent_score", desc=True).order("created_at", desc=True).limit(limit * 2).execute()
+        return [l for l in (result.data or []) if l.get("stage") not in CLOSED_STAGES][:limit]
+
+    async def count_by_stage(self, assigned_broker_id: Optional[str] = None) -> Dict[str, int]:
+        """Exact per-stage totals (leads without a stage are bucketed by legacy status)."""
+        counts: Dict[str, int] = {}
+
+        def _count(**eq: Any) -> int:
+            query = self.table.select("id", count="exact").eq("workspace_id", self.workspace_id)
+            if assigned_broker_id:
+                query = query.eq("assigned_broker", assigned_broker_id)
+            for key, value in eq.items():
+                query = query.is_(key, "null") if value is None else query.eq(key, value)
+            return int(query.limit(1).execute().count or 0)
+
+        for stage in PIPELINE_STAGES:
+            counts[stage] = _count(stage=stage)
+        for status, stage in LEGACY_STATUS_STAGE.items():
+            counts[stage] = counts.get(stage, 0) + _count(stage=None, status=status)
+        return counts
+
+    async def summary(self, assigned_broker_id: Optional[str] = None) -> Dict[str, Any]:
+        """Exact workspace totals; ``average_intent_score`` is over the newest 1000 leads."""
+        def _count(**eq: Any) -> int:
+            query = self.table.select("id", count="exact").eq("workspace_id", self.workspace_id)
+            if assigned_broker_id:
+                query = query.eq("assigned_broker", assigned_broker_id)
+            for key, value in eq.items():
+                query = query.is_(key, "null") if value is None else query.eq(key, value)
+            return int(query.limit(1).execute().count or 0)
+
+        status_counts = {s: _count(status=s) for s in ("new", "contacted", "qualified", "nurture", "closed", "lost")}
+        recent = await self.list_all(limit=1000, assigned_broker_id=assigned_broker_id)
+        return {
+            **summarize_leads(recent),
+            "total_leads": _count(),
+            "qualified_leads": status_counts["qualified"] + status_counts["closed"],
+            "closed_leads": status_counts["closed"],
+            "unassigned_leads": _count(assigned_broker=None),
+            "status_counts": {k: v for k, v in status_counts.items() if v},
+        }
 
     async def update(self, lead_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         result = self.table.update(updates).eq("workspace_id", self.workspace_id).eq("id", lead_id).execute()

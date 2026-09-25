@@ -390,3 +390,20 @@
     - say: "تمام"
       move: confirm_handoff
       reply_excludes: ["اختيار ممتاز"]
+
+- id: shortlist_then_empty_search_uses_no_inventory_wording
+  turns:
+    - say: "buy a 2 bed apartment in dubai marina"
+    - say: "2.5 million"
+      move: suggest
+      cards_min: 1
+    - say: "actually I want a villa in business bay for 1.2 million"
+      move: suggest
+      cards_max: 0
+    - say: "3 months, cash"
+      move: suggest
+      cards_max: 0
+    - say: "ok"
+      move: confirm_handoff
+      reply_excludes: ["great choice"]
+      reply_includes: ["specialist"]
