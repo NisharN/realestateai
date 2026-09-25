@@ -8,7 +8,9 @@ import {
   type CsvUploadResult,
   type DataHealth,
   type FieldMapEntry,
+  type OpsOverview,
   type ReviewItem,
+  type TurnStats,
 } from "@/lib/api";
 import { relativeTime } from "@/lib/broker-format";
 
@@ -32,7 +34,7 @@ const TARGET_FIELDS = [
   "listing_ref", "external_id", "created_at", "consent",
 ];
 
-type Tab = "connectors" | "csv" | "review" | "health";
+type Tab = "connectors" | "csv" | "review" | "health" | "ops";
 
 export default function IngestionAdminPage() {
   const [tab, setTab] = useState<Tab>("connectors");
@@ -63,6 +65,7 @@ export default function IngestionAdminPage() {
               ["csv", "CSV upload"],
               ["review", "Review queue"],
               ["health", "Data health"],
+              ["ops", "Ops"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -85,6 +88,7 @@ export default function IngestionAdminPage() {
           {tab === "csv" && <CsvTab say={say} />}
           {tab === "review" && <ReviewTab say={say} />}
           {tab === "health" && <HealthTab say={say} />}
+          {tab === "ops" && <OpsTab say={say} />}
         </div>
       </div>
     </main>
@@ -546,6 +550,118 @@ function HealthTab({ say }: { say: Say }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function pct(v: number): string {
+  return `${Math.round(v * 1000) / 10}%`;
+}
+
+function TurnStatsCard({ title, stats }: { title: string; stats: TurnStats }) {
+  const cells: [string, string][] = [
+    ["Turns", String(stats.turns)],
+    ["p50", stats.latency_ms.p50 == null ? "—" : `${stats.latency_ms.p50} ms`],
+    ["p95", stats.latency_ms.p95 == null ? "—" : `${stats.latency_ms.p95} ms`],
+    ["Fallback rate", pct(stats.fallback_rate)],
+    ["Guard failures", String(stats.guard_failures)],
+    ["Tool failures", String(stats.tool_failures)],
+    ["LLM fallbacks", String(stats.llm_fallbacks)],
+  ];
+  return (
+    <div className="rounded-2xl border bg-white p-4">
+      <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+      <dl className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {cells.map(([k, v]) => (
+          <div key={k}>
+            <dt className="text-[10px] uppercase tracking-wide text-slate-500">{k}</dt>
+            <dd className="text-lg font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function OpsTab({ say }: { say: Say }) {
+  const [ops, setOps] = useState<OpsOverview | null>(null);
+
+  useEffect(() => {
+    const load = () => adminApi.ops().then((r) => (r.data ? setOps(r.data) : say(r, "")));
+    void load();
+    const timer = setInterval(load, 30_000);
+    return () => clearInterval(timer);
+  }, [say]);
+
+  if (!ops) return <p role="status" className="text-sm text-slate-500">Loading…</p>;
+
+  return (
+    <div className="grid gap-6">
+      <section aria-label="Active alerts">
+        {ops.alerts.length === 0 ? (
+          <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
+            No active alerts. {ops.llm_configured ? "" : "No LLM provider configured — template replies are expected, so the fallback-rate alert is disabled."}
+          </p>
+        ) : (
+          <ul className="grid gap-2">
+            {ops.alerts.map((a) => (
+              <li
+                key={a.code}
+                role="alert"
+                className={`rounded-xl border p-3 text-sm ${a.severity === "critical" ? "border-red-300 bg-red-50 text-red-800" : "border-amber-300 bg-amber-50 text-amber-800"}`}
+              >
+                <span className="font-semibold uppercase">{a.severity}</span> · {a.message}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <TurnStatsCard title={`Last ${ops.window_minutes} minutes`} stats={ops.window} />
+      <TurnStatsCard title="Last 1,000 turns" stats={ops.recent_1000} />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border bg-white p-4">
+          <h3 className="text-sm font-semibold text-slate-700">Consumers</h3>
+          <table className="mt-2 w-full text-left text-sm">
+            <thead className="text-xs text-slate-500"><tr><th className="py-1">Consumer</th><th className="py-1">Pending</th><th className="py-1">Lag</th></tr></thead>
+            <tbody>
+              {Object.entries(ops.consumers).map(([name, c]) => (
+                <tr key={name} className={`border-t ${c.lag_s > ops.thresholds.consumer_lag_s ? "text-red-700" : ""}`}>
+                  <td className="py-2">{name}</td>
+                  <td className="py-2">{c.pending}</td>
+                  <td className="py-2">{c.lag_s}s</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-3 text-sm text-slate-600">
+            Review queue: <span className={ops.review_open > ops.thresholds.review_queue ? "font-semibold text-red-700" : "font-semibold"}>{ops.review_open}</span> open
+          </p>
+        </div>
+        <div className="rounded-2xl border bg-white p-4">
+          <h3 className="text-sm font-semibold text-slate-700">Connectors</h3>
+          {ops.connectors.length === 0 && <p className="mt-2 text-sm text-slate-500">No connectors.</p>}
+          <ul className="mt-2 grid gap-2 text-sm">
+            {ops.connectors.map((c) => (
+              <li key={c.connector_id} className="flex items-center justify-between border-t pt-2">
+                <span>
+                  <span className="font-medium">{c.display_name ?? c.type}</span>
+                  <span className="ml-2 text-xs capitalize text-slate-500">{c.status}</span>
+                </span>
+                <span className={c.consecutive_failures >= ops.thresholds.connector_failures ? "text-red-700" : "text-slate-600"}>
+                  {c.consecutive_failures} failures · {relativeTime(c.last_success_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        Thresholds: fallback &gt; {pct(ops.thresholds.fallback_rate)} / {ops.window_minutes} min · consumer lag &gt; {ops.thresholds.consumer_lag_s}s ·
+        connector ≥ {ops.thresholds.connector_failures} consecutive failures · review queue &gt; {ops.thresholds.review_queue}. Generated {relativeTime(ops.generated_at)}.
+      </p>
     </div>
   );
 }

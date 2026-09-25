@@ -35,6 +35,7 @@ from app.modules.tools import property_search
 from app.modules.tools.area_profile import area_profile
 from app.modules.tools.compare import compare
 from app.modules.tools.viewing_slots import next_slots
+from app.modules.handoff.viewings import request_viewing
 
 from . import policy, templates
 from .facts import ExtractedFacts, Reaction
@@ -267,9 +268,10 @@ async def _run_tools(
         repo = ConversationRepo(workspace_id)
         transcript = await repo.transcript(state.lead_id)
         slot_text = None
+        slot = None
         if move == Move.HANDOFF:
-            slots = next_slots(count=1)
-            slot_text = slots[0].label_en if state.language == "en" else slots[0].label_ar
+            slot = next_slots(count=1)[0]
+            slot_text = slot.label_en if state.language == "en" else slot.label_ar
         await guarded(
             "handoff",
             create_handoff(
@@ -283,6 +285,20 @@ async def _run_tools(
         )
         if "handoff" in results:
             state.handoff_id = results["handoff"].get("id")
+            if slot is not None:
+                liked = [p.property_id for p in state.shortlist if p.reaction == "liked"]
+                shortlist = liked or [p.property_id for p in state.current_shortlist()]
+                await guarded(
+                    "viewing",
+                    request_viewing(
+                        workspace_id,
+                        lead_id=state.lead_id,
+                        property_id=shortlist[0] if shortlist else None,
+                        starts_at=slot.starts_at,
+                        broker_id=results["handoff"].get("broker_id"),
+                        source="buyer",
+                    ),
+                )
     return results
 
 

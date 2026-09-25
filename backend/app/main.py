@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.modules.ops.health import deep_health
 from app.api import (
     admin,
     auth,
@@ -109,6 +110,13 @@ async def health_check():
             "enabled" if settings.VOICE_OUTBOUND_ENABLED else "disabled"
         ),
     }
+
+
+@app.get("/health/deep")
+async def health_deep():
+    """Time-boxed probes of the datastore, Redis and LLM breakers (architecture §12)."""
+    report = await deep_health(get_settings().WORKSPACE_ID)
+    return JSONResponse(report, status_code=503 if report["status"] == "unhealthy" else 200)
 
 
 # Include routers

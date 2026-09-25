@@ -131,6 +131,25 @@ export default function BrokerTodayPage() {
               )}
             </Panel>
 
+            <Panel title="Viewings" count={data.viewings.length} empty="No viewings requested or booked.">
+              {data.viewings.map((v) => (
+                <div key={v.id} className="flex items-center justify-between rounded-xl border bg-white p-3 text-sm">
+                  <div>
+                    <Link href={`/broker/leads/${v.lead_id}`} className="font-medium hover:underline">
+                      Lead {v.lead_id.slice(0, 8)}
+                    </Link>
+                    <p className="text-xs text-slate-500">
+                      {v.starts_at
+                        ? new Date(v.starts_at).toLocaleString("en-AE", { timeZone: "Asia/Dubai", dateStyle: "medium", timeStyle: "short" })
+                        : "time TBC"}
+                      {v.property_id ? ` · property ${v.property_id}` : ""} · via {v.source}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium capitalize">{v.status}</span>
+                </div>
+              ))}
+            </Panel>
+
             <Panel title="Follow-ups" count={data.followups.length} empty="No follow-ups scheduled.">
               {data.followups.map((f) => (
                 <div key={f.id} className="flex items-center justify-between rounded-xl border bg-white p-3 text-sm">

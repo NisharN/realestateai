@@ -237,3 +237,39 @@ def test_agent_without_broker_profile_gets_403_and_no_unassigned_followups():
     finally:
         app.dependency_overrides.clear()
     assert client.get("/api/v1/broker/followups").json() != []
+
+
+def test_viewings_api_lifecycle_and_stage_sync():
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    lead, h = loop.run_until_complete(_handoff())
+    starts = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
+    created = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "property_id": "prop-1", "starts_at": starts, "confirmed": False})
+    assert created.status_code == 201, created.text
+    v = created.json()
+    assert v["status"] == "requested" and v["source"] == "broker" and v["broker_id"] == h["broker_id"]
+
+    dup = client.post("/api/v1/broker/viewings", json={"lead_id": lead["id"], "property_id": "prop-1", "starts_at": starts, "confirmed": False}).json()
+    assert dup["id"] == v["id"]
+
+    listed = client.get("/api/v1/broker/viewings", params={"lead_id": lead["id"], "status": "requested"}).json()
+    assert [x["id"] for x in listed] == [v["id"]]
+    assert client.get("/api/v1/broker/today").json()["counts"]["viewings"] == 1
+
+    bad = client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"status": "done"})
+    assert bad.status_code == 409
+
+    ok = client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"status": "confirmed", "notes": "meet at lobby"})
+    assert ok.status_code == 200 and ok.json()["status"] == "confirmed" and ok.json()["notes"] == "meet at lobby"
+    detail = client.get(f"/api/v1/broker/leads/{lead['id']}").json()
+    assert detail["lead"]["stage"] == "viewing_booked"
+    assert [x["status"] for x in detail["viewings"]] == ["confirmed"]
+    assert any(t.get("type") == "viewing.confirmed" for t in detail["timeline"])
+
+    done = client.patch(f"/api/v1/broker/viewings/{v['id']}", json={"status": "done"})
+    assert done.status_code == 200
+    assert client.get("/api/v1/broker/today").json()["counts"]["viewings"] == 0
+    assert client.patch("/api/v1/broker/viewings/missing", json={"status": "done"}).status_code == 404
+    assert client.post("/api/v1/broker/viewings", json={"lead_id": "missing", "starts_at": starts}).status_code == 404

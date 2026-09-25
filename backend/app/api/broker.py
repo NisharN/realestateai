@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.auth import RequestContext, WorkspaceRole, get_request_context
 from app.database import get_lead_repository
 from app.modules.conversation.repository import ConversationRepo
-from app.modules.handoff import followups
+from app.modules.handoff import followups, viewings
 from app.modules.handoff.service import accept_handoff, decline_handoff, reassign_stale
 from app.modules.store import new_id, now_iso, table
 
@@ -87,7 +87,7 @@ async def broker_today(broker_id: str | None = None, context: RequestContext = D
 
     leads = [l for l in await repo.list_all(limit=500) if not scope or l.get("assigned_broker") == scope]
     hot = sorted((l for l in leads if (l.get("band") == "hot" or (l.get("intent_score") or 0) >= 70) and _lead_stage(l) not in ("closed", "lost", "opted_out")), key=lambda l: -(l.get("score") or l.get("intent_score") or 0))
-    viewings = await table("viewings", ws).select(status__in=["requested", "confirmed"], order="starts_at", limit=50, **({"broker_id": scope} if scope else {}))
+    upcoming = await viewings.list_viewings(ws, broker_id=scope, statuses=["requested", "confirmed"], limit=50)
 
     return {
         "date": today,
@@ -96,14 +96,14 @@ async def broker_today(broker_id: str | None = None, context: RequestContext = D
             "new_handoffs": len(pending),
             "accepted": len(accepted),
             "hot_leads": len(hot),
-            "viewings": len(viewings),
+            "viewings": len(upcoming),
             "followups_due": len([f for f in await followups.pending_for_broker(ws, scope, limit=200, include_unassigned=context.role != WorkspaceRole.AGENT) if f["due_at"][:10] <= today]),
             "escalated": len(escalated),
         },
         "new_handoffs": await with_lead(pending),
         "accepted_handoffs": await with_lead(accepted[:20]),
         "hot_leads": [_summary(l) for l in hot[:20]],
-        "viewings": viewings,
+        "viewings": upcoming,
         "followups": await followups.pending_for_broker(ws, scope, limit=20, include_unassigned=context.role != WorkspaceRole.AGENT),
         "escalated": await with_lead(escalated),
     }
@@ -134,6 +134,7 @@ async def lead_detail(lead_id: str, context: RequestContext = Depends(get_reques
     changes = await table("lead_change_log", ws).select(lead_id=lead_id, order="at", limit=100)
     sources = await table("lead_sources", ws).select(lead_id=lead_id, limit=50)
     fups = await table("followups", ws).select(lead_id=lead_id, order="due_at", limit=20)
+    lead_viewings = await viewings.list_viewings(ws, lead_id=lead_id, limit=20)
     timeline = sorted(
         [
             *({"at": e.get("created_at"), "kind": "event", "type": e.get("type"), "payload": e.get("payload")} for e in events),
@@ -148,6 +149,7 @@ async def lead_detail(lead_id: str, context: RequestContext = Depends(get_reques
         "handoff": _handoff_public(handoff) if handoff else None,
         "sources": sources,
         "followups": fups,
+        "viewings": lead_viewings,
         "timeline": timeline,
     }
 
@@ -236,6 +238,76 @@ async def decline(handoff_id: str, body: HandoffAction | None = None, context: R
     if not row:
         raise HTTPException(409, detail={"code": "handoff_not_declinable", "message": "Handoff is not pending for this broker"})
     return _handoff_public(row)
+
+
+class ViewingCreate(BaseModel):
+    lead_id: str
+    property_id: str | None = None
+    starts_at: datetime
+    broker_id: str | None = None
+    notes: str | None = Field(None, max_length=1000)
+    confirmed: bool = True
+
+
+class ViewingUpdate(BaseModel):
+    status: viewings.ViewingStatus | None = None
+    starts_at: datetime | None = None
+    broker_id: str | None = None
+    notes: str | None = Field(None, max_length=1000)
+
+
+@router.get("/viewings")
+async def viewings_index(
+    broker_id: str | None = None,
+    lead_id: str | None = None,
+    status: str | None = None,
+    context: RequestContext = Depends(get_request_context),
+):
+    scope = _broker_scope(context, broker_id)
+    statuses = [s for s in (status or "").split(",") if s in viewings.STATUSES] or None
+    return await viewings.list_viewings(context.workspace_id, lead_id=lead_id, broker_id=scope, statuses=statuses)
+
+
+@router.post("/viewings", status_code=201)
+async def create_viewing(body: ViewingCreate, context: RequestContext = Depends(get_request_context)):
+    ws = context.workspace_id
+    lead = await get_lead_repository(ws).get_by_id(body.lead_id)
+    if not lead or not _visible(context, lead):
+        raise HTTPException(404, detail={"code": "lead_not_found", "message": "Lead not found"})
+    broker_id = context.broker_id if context.role == WorkspaceRole.AGENT else (body.broker_id or lead.get("assigned_broker"))
+    return await viewings.request_viewing(
+        ws,
+        lead_id=body.lead_id,
+        property_id=body.property_id,
+        starts_at=body.starts_at,
+        broker_id=broker_id,
+        source="broker",
+        notes=body.notes,
+        status="confirmed" if body.confirmed else "requested",
+    )
+
+
+@router.patch("/viewings/{viewing_id}")
+async def patch_viewing(viewing_id: str, body: ViewingUpdate, context: RequestContext = Depends(get_request_context)):
+    ws = context.workspace_id
+    row = await table("viewings", ws).get(id=viewing_id)
+    if not row:
+        raise HTTPException(404, detail={"code": "viewing_not_found", "message": "Viewing not found"})
+    if context.role == WorkspaceRole.AGENT and row.get("broker_id") not in (None, context.broker_id):
+        raise HTTPException(404, detail={"code": "viewing_not_found", "message": "Viewing not found"})
+    try:
+        saved = await viewings.update_viewing(
+            ws,
+            viewing_id,
+            status=body.status,
+            starts_at=body.starts_at,
+            broker_id=context.broker_id if context.role == WorkspaceRole.AGENT and body.broker_id is None and row.get("broker_id") is None else body.broker_id,
+            notes=body.notes,
+            actor=context.user_id,
+        )
+    except viewings.InvalidTransition as exc:
+        raise HTTPException(409, detail={"code": "invalid_transition", "message": str(exc)})
+    return saved
 
 
 @router.post("/handoffs/reassign-stale")
