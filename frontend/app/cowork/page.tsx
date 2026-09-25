@@ -138,7 +138,7 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab, sub?: IngestionTab
           <StatCard
             label={`Runs · last ${ov.runs.window_hours}h`}
             value={ov.runs.runs}
-            hint={rate == null ? "no runs yet" : `${Math.round(rate * 100)}% success · ${ov.runs.failed} failed`}
+            hint={rate == null ? "no runs yet" : `${Math.round(rate)}% success · ${ov.runs.failed} failed`}
             tone={ov.runs.failed ? "warning" : "default"}
           />
         </button>
