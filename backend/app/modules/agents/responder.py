@@ -52,7 +52,11 @@ async def respond(
     fallbacks: list[str] = []
     voice = state.channel == "voice"
     max_sentences = 2 if voice else 4
-    template_key = "suggest_empty" if move == Move.SUGGEST and not facts.get("cards") else None
+    template_key = None
+    if move == Move.SUGGEST and not facts.get("cards"):
+        template_key = "suggest_empty"
+    elif move == Move.CONFIRM_HANDOFF and not state.shortlist:
+        template_key = "confirm_handoff_no_inventory"
     template_reply = templates.render(move, state.language, facts, field=field, key=template_key)
 
     # Deterministic moves are always templated: no LLM value, and the wording is compliance-sensitive.

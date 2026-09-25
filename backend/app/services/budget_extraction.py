@@ -74,7 +74,13 @@ SUFFIX_MULTIPLIER = {
 NON_MONEY_UNIT = re.compile(
     r"^\s*(bed|beds|bedroom|bedrooms|bhk|br\b|bath|baths|bathroom|bathrooms|"
     r"sq\.?\s?ft|sqft|sqm|sq\.?\s?m|square|floor|storey|story|year|years|"
-    r"month|months|bed-?room)",
+    r"month|months|bed-?room|"
+    r"غرف|غرفة|غرفه|حمام|حمامات|قدم|متر|طابق|سنة|سنوات|شهر|أشهر|اشهر)",
+    re.I,
+)
+# Numbers preceded by these are labels, not money: "floor 20", "tower 3", "no. 4".
+NON_MONEY_PREFIX = re.compile(
+    r"(floor|level|tower|building|unit|apt|apartment|villa|no\.?|#|طابق|برج|رقم)\s*$",
     re.I,
 )
 
@@ -143,6 +149,8 @@ def _parse_amounts(text: str) -> list[float]:
         trailing = text[match.end():]
         if not suffix and NON_MONEY_UNIT.match(trailing):
             continue  # "2 bed", "1200 sqft" — describing the property
+        if not suffix and NON_MONEY_PREFIX.search(text[: match.start()]):
+            continue  # "floor 20", "tower 3"
 
         raw = match.group("num").replace(",", "")
         try:

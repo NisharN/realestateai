@@ -76,7 +76,7 @@ OBJECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 BEDROOM_RE = re.compile(
     r"\b(\d{1,2})\s*(-|\s)?\s*(bed(room)?s?|br|bhk)\b|\b(studio)\b|"
     r"\b(one|two|three|four|five|six)\s*(-|\s)?\s*(bed(room)?s?|br)\b|"
-    r"(\d{1,2})\s*غرف|غرفتين|غرفه واحده|غرفة واحدة|ثلاث غرف|أربع غرف|استوديو",
+    r"(?P<ar_num>\d{1,2})\s*غرف|غرفتين|غرفه واحده|غرفة واحدة|ثلاث غرف|أربع غرف|استوديو",
     re.I,
 )
 WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
@@ -139,8 +139,8 @@ def _bedrooms(text: str) -> int | None:
         return 0
     if m.group(6):
         return WORD_NUM[m.group(6).lower()]
-    if m.group(9):
-        return int(m.group(9))
+    if m.group("ar_num"):
+        return int(m.group("ar_num"))
     for ar, n in AR_BED.items():
         if ar in m.group(0):
             return n

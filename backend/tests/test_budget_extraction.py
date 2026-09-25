@@ -77,3 +77,13 @@ def test_empty_input():
     result = extract_budget("")
     assert result.amount_min is None
     assert result.to_lead_fields() == {}
+
+
+def test_arabic_room_count_is_not_treated_as_budget():
+    result = extract_budget("أريد شراء شقة 3 غرف في الخليج التجاري")
+    assert result.amount_max is None
+
+
+def test_floor_number_is_not_treated_as_budget():
+    result = extract_budget("apartment on floor 20, budget 1.5m")
+    assert result.amount_max == 1_500_000

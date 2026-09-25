@@ -127,9 +127,13 @@ def resolve_area(text: str, threshold: float = 0.8) -> list[AreaMatch]:
     if not norm:
         return []
     matches: dict[str, AreaMatch] = {}
+    taken: list[tuple[int, int]] = []  # spans claimed by longer terms ("palm jumeirah" owns "jumeirah")
 
     for term, community in _INDEX:
-        if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", norm):
+        for hit in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", norm):
+            if any(s <= hit.start() and hit.end() <= e for s, e in taken):
+                continue
+            taken.append((hit.start(), hit.end()))
             existing = matches.get(community.id)
             if existing is None or existing.confidence < 1.0:
                 matches[community.id] = AreaMatch(community, 1.0, term)

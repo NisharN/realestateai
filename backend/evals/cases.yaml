@@ -306,3 +306,87 @@
       move: suggest
       reply_contains: ["don't have a live listing"]
       reply_excludes: ["AED 3", "million"]
+# --------------------------------------------------- area resolution edge cases
+- id: palm_jumeirah_is_not_also_jumeirah
+  turns:
+    - say: "buy a villa in Palm Jumeirah"
+      slots: {area: ["Palm Jumeirah"]}
+- id: jbr_full_name_single_area
+  turns:
+    - say: "rent in Jumeirah Beach Residence"
+      slots: {area: ["Jumeirah Beach Residence"], purpose: rent}
+- id: damac_hills_is_not_dubai_hills
+  turns:
+    - say: "townhouse in damac hills to buy"
+      slots: {area: ["DAMAC Hills"]}
+- id: two_distinct_areas_both_kept
+  turns:
+    - say: "buy a 2 bed in marina or jlt"
+      slots: {area: ["Dubai Marina", "Jumeirah Lakes Towers"]}
+- id: area_typo_fuzzy_resolves
+  turns:
+    - say: "buy apartment in dubai marnia"
+      slots: {area: ["Dubai Marina"]}
+- id: jumeirah_alone_resolves_to_jumeirah
+  turns:
+    - say: "villa in jumeirah to buy"
+      slots: {area: ["Jumeirah"]}
+# ----------------------------------------------- numbers that are not budgets
+- id: arabic_room_count_is_not_budget
+  turns:
+    - say: "أريد شراء شقة 3 غرف في الخليج التجاري"
+      language: ar
+      move: ask_next_field
+      slots: {bedrooms: 3, purpose: buy}
+- id: english_room_count_is_not_budget
+  turns:
+    - say: "buy 3 bed apartment in business bay"
+      move: ask_next_field
+- id: sqft_is_not_budget
+  turns:
+    - say: "buy a 1500 sqft apartment in downtown"
+      move: ask_next_field
+      slots: {purpose: buy, area: ["Downtown Dubai"]}
+- id: floor_is_not_budget
+  turns:
+    - say: "buy apartment on floor 20 in marina"
+      move: ask_next_field
+- id: bare_number_after_type_clarifies
+  turns:
+    - say: "buy apartment in marina"
+    - say: "2"
+      move: clarify_budget
+- id: budget_usd_kept_as_usd
+  turns:
+    - say: "buy apartment in marina"
+    - say: "usd 800k"
+      move: suggest
+# -------------------------------------------------------- handoff wording
+- id: no_inventory_handoff_does_not_say_great_choice
+  turns:
+    - say: "buy 1 bed apartment in business bay"
+    - say: "1.2 million"
+      move: suggest
+      cards_max: 0
+    - say: "3 months, cash"
+      move: suggest
+      cards_max: 0
+    - say: "ok"
+      move: confirm_handoff
+      reply_excludes: ["great choice"]
+    - say: "yes please"
+      move: handoff
+      handoff: true
+- id: arabic_no_inventory_handoff_wording
+  turns:
+    - say: "أريد شراء شقة غرفة واحدة في الخليج التجاري"
+      language: ar
+    - say: "1.2 مليون"
+      move: suggest
+      cards_max: 0
+    - say: "خلال 3 أشهر، كاش"
+      move: suggest
+      cards_max: 0
+    - say: "تمام"
+      move: confirm_handoff
+      reply_excludes: ["اختيار ممتاز"]

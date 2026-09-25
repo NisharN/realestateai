@@ -24,7 +24,9 @@ from app.modules.conversation.engine import handle_turn
 from app.modules.store import reset_memory
 from app.seed_data import mock_property_records
 
-CASES = Path(__file__).resolve().parent.parent / "evals" / "cases.yaml"
+EVALS_DIR = Path(__file__).resolve().parent.parent / "evals"
+CASES = EVALS_DIR / "cases.yaml"
+MATRIX = EVALS_DIR / "matrix.yaml"
 
 
 @dataclass
@@ -37,20 +39,52 @@ class CaseResult:
         return not self.failures
 
 
-def load_cases(path: Path = CASES) -> list[dict[str, Any]]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or []
+def load_cases(path: Path = CASES, matrix_path: Path | None = MATRIX) -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    if matrix_path is not None and matrix_path.exists():
+        cases.extend(expand_matrix(yaml.safe_load(matrix_path.read_text(encoding="utf-8")) or {}))
+    return cases
+
+
+def _fill(value: Any, scenario: dict[str, Any]) -> Any:
+    """Substitute {key} placeholders; a bare "{key}" keeps the scenario value's type."""
+    if isinstance(value, str):
+        if value.startswith("{") and value.endswith("}") and value[1:-1] in scenario:
+            return scenario[value[1:-1]]
+        return value.format_map(scenario)
+    if isinstance(value, list):
+        return [_fill(v, scenario) for v in value]
+    if isinstance(value, dict):
+        return {k: _fill(v, scenario) for k, v in value.items()}
+    return value
+
+
+def expand_matrix(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    scenarios: list[dict[str, Any]] = spec.get("scenarios") or []
+    out: list[dict[str, Any]] = []
+    for template in spec.get("matrix") or []:
+        requires: dict[str, Any] = template.get("requires") or {}
+        for scenario in scenarios:
+            if any(scenario.get(k) != v for k, v in requires.items()):
+                continue
+            out.append({"id": f"{template['id']}__{scenario['id']}", "turns": _fill(template["turns"], scenario)})
+    return out
 
 
 def _check(turn: dict[str, Any], result: Any, idx: int, out: list[str]) -> None:
     tag = f"turn {idx} ({turn['say'][:30]!r})"
     if "move" in turn and result.move != turn["move"]:
         out.append(f"{tag}: move {result.move!r} != {turn['move']!r}")
+    if "move_in" in turn and result.move not in turn["move_in"]:
+        out.append(f"{tag}: move {result.move!r} not in {turn['move_in']!r}")
     if "ended" in turn and bool(result.ended) != turn["ended"]:
         out.append(f"{tag}: ended={result.ended}")
     if "handoff" in turn and bool(result.handoff_id) != turn["handoff"]:
         out.append(f"{tag}: handoff_id={result.handoff_id}")
     if "cards_min" in turn and len(result.cards) < turn["cards_min"]:
         out.append(f"{tag}: {len(result.cards)} cards < {turn['cards_min']}")
+    if "cards_max" in turn and len(result.cards) > turn["cards_max"]:
+        out.append(f"{tag}: {len(result.cards)} cards > {turn['cards_max']}")
     if "language" in turn and result.language != turn["language"]:
         out.append(f"{tag}: language {result.language!r}")
     for needle in turn.get("reply_contains", []):
