@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,6 +16,7 @@ from app.database import get_lead_repository
 from app.main import app
 from app.modules.ingestion import events
 from app.modules.ingestion.connectors.base import land
+from app.modules.ingestion.connectors.crm_pull import poll_connector
 from app.modules.ingestion.connectors.csv_upload import parse_csv
 from app.modules.ingestion.connectors.webhook import SignatureError, WebhookConnector
 from app.modules.ingestion.field_maps import suggest_field_map
@@ -290,3 +292,43 @@ def test_field_map_put_and_get():
     assert put.status_code == 200
     got = client.get(f"/api/v1/admin/connectors/{created['id']}/field-map").json()
     assert {m["source_field"]: m["target_field"] for m in got["approved"]} == {"Tel": "phone", "Notes": None}
+
+
+# -- CRM pull connector -----------------------------------------------------
+
+async def test_crm_pull_pages_lands_and_advances_cursor():
+    pages = {
+        None: {"data": {"items": [{"id": 1, "Name": "Ali Khan", "Mobile": "0501234567", "updated_at": "2026-01-01T00:00:00"}]}, "paging": {"next": "c2"}},
+        "c2": {"data": {"items": [{"id": 2, "Name": "Sara Noor", "Mobile": "0507654321", "updated_at": "2026-01-02T00:00:00"}]}, "paging": {}},
+    }
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.headers) | {"cursor": request.url.params.get("updated_after", "")})
+        return httpx.Response(200, json=pages[request.url.params.get("updated_after") or None])
+
+    created = client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "tok", "config": {"url": "https://crm.test/leads", "records_path": "data.items", "next_cursor_path": "paging.next"}}).json()
+    assert "secret" not in created and created["has_secret"] and created["mode"] == "pull"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        first = await poll_connector(created["id"], workspace_id=WS, client=http)
+        assert first["fetched"] == 2 and first["landed"] == 2 and first["cursor"] == "c2"
+        assert seen[0]["authorization"] == "Bearer tok" and seen[1]["cursor"] == "c2"
+        again = await poll_connector(created["id"], workspace_id=WS, client=http)
+        assert again["landed"] == 0 and again["duplicates"] == 1  # resumes from cursor; page already landed
+
+    outcomes = await process_many(first["raw_ids"], workspace_id=WS)
+    assert [o.status for o in outcomes] == ["published", "published"]
+    leads = await get_lead_repository(WS).list_all()
+    assert {l["phone"] for l in leads} == {"+971501234567", "+971507654321"}
+    assert {l["source"] for l in leads} == {"crm"} and {l["crm_external_id"] for l in leads} == {"1", "2"}
+
+
+async def test_crm_pull_failure_records_run_and_pauses_after_five():
+    created = client.post("/api/v1/admin/connectors", json={"type": "hubspot", "config": {"url": "https://crm.test/x"}}).json()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as http:
+        for _ in range(5):
+            res = await poll_connector(created["id"], workspace_id=WS, client=http)
+    assert "error" in res
+    row = client.get(f"/api/v1/admin/connectors/{created['id']}").json()
+    assert row["status"] == "paused" and row["consecutive_failures"] == 5

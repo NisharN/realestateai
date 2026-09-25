@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import RequestContext, WorkspaceRole, get_request_context
+from app.modules.ingestion.connectors.crm_pull import poll_connector
 from app.modules.ingestion.field_maps import save_field_map, suggest_field_map
-from app.modules.ingestion.pipeline.processor import resolve_review, retry_errors
+from app.modules.ingestion.pipeline.processor import process_many, resolve_review, retry_errors
 from app.modules.store import now_iso, table
 
 router = APIRouter()
 
-CONNECTOR_TYPES = ("csv_upload", "webhook", "google_sheets", "email_portal", "hubspot", "zoho", "salesforce", "bitrix24", "manual")
+CONNECTOR_TYPES = ("csv_upload", "webhook", "google_sheets", "portal_email", "hubspot", "zoho", "salesforce", "bitrix24", "generic_crm", "manual")
 
 
 def _admin(context: RequestContext) -> RequestContext:
@@ -28,6 +29,7 @@ class ConnectorCreate(BaseModel):
     mode: Literal["pull", "push"] | None = None
     schedule_seconds: int = Field(300, ge=0, le=86_400)
     config: dict[str, Any] = Field(default_factory=dict)
+    credential: str | None = Field(None, max_length=4096, description="API token for pull connectors; stored, never echoed")
 
 
 class ConnectorPatch(BaseModel):
@@ -35,6 +37,7 @@ class ConnectorPatch(BaseModel):
     status: Literal["active", "paused", "disabled"] | None = None
     schedule_seconds: int | None = Field(None, ge=0, le=86_400)
     config: dict[str, Any] | None = None
+    credential: str | None = Field(None, max_length=4096)
     rotate_secret: bool = False
 
 
@@ -68,12 +71,13 @@ async def create_connector(body: ConnectorCreate, context: RequestContext = Depe
             "consecutive_failures": 0,
             "schedule_seconds": body.schedule_seconds,
             "config": body.config,
-            "secret": secrets.token_urlsafe(32) if body.type == "webhook" else None,
+            "secret": secrets.token_urlsafe(32) if body.type == "webhook" else body.credential,
+            "cursor": None,
             "created_by": context.user_id,
             "updated_at": now_iso(),
         }
     )
-    out = _public(row, reveal_secret=True)
+    out = _public(row, reveal_secret=row.get("type") == "webhook")
     if row.get("type") == "webhook":
         out["webhook_path"] = f"/api/v1/ingest/webhook/{row['id']}?workspace_id={context.workspace_id}"
     return out
@@ -95,7 +99,9 @@ async def patch_connector(connector_id: str, body: ConnectorPatch, context: Requ
     row = await connectors.get(id=connector_id)
     if not row:
         raise HTTPException(404, detail={"code": "connector_not_found", "message": "Connector not found"})
-    updates: dict[str, Any] = {k: v for k, v in body.model_dump(exclude={"rotate_secret"}).items() if v is not None}
+    updates: dict[str, Any] = {k: v for k, v in body.model_dump(exclude={"rotate_secret", "credential"}).items() if v is not None}
+    if body.credential and row.get("type") != "webhook":
+        updates["secret"] = body.credential
     if body.status == "active":
         updates["consecutive_failures"] = 0
     if body.rotate_secret and row.get("type") == "webhook":
@@ -172,6 +178,19 @@ async def resolve_review_item(item_id: str, body: ReviewResolve, context: Reques
     if outcome is None:
         raise HTTPException(404, detail={"code": "review_item_not_found", "message": "Review item not found or already resolved"})
     return outcome.model_dump()
+
+
+@router.post("/connectors/{connector_id}/run")
+async def run_connector_now(connector_id: str, context: RequestContext = Depends(get_request_context)):
+    _admin(context)
+    row = await table("connectors", context.workspace_id).get(id=connector_id)
+    if not row:
+        raise HTTPException(404, detail={"code": "connector_not_found", "message": "Connector not found"})
+    if row.get("mode") != "pull":
+        raise HTTPException(400, detail={"code": "not_a_pull_connector", "message": "Only pull connectors can be run on demand"})
+    result = await poll_connector(connector_id, workspace_id=context.workspace_id)
+    outcomes = await process_many(result.get("raw_ids", [])[:500], workspace_id=context.workspace_id)
+    return {**{k: v for k, v in result.items() if k != "raw_ids"}, "processed": len(outcomes), "published": sum(1 for o in outcomes if o.status == "published")}
 
 
 @router.post("/pipeline/retry-errors")
