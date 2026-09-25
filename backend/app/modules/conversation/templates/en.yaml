@@ -53,6 +53,8 @@ ask_reaction:
   - "Noted, thank you. Do any of the options I showed you look interesting, or should I adjust the search?"
 after_handoff:
   - "Thanks — {broker_name} has your details and will be in touch shortly. If anything changes, just let me know."
+confirm_transcript:
+  - "Did you say: {transcript}? Say yes, or repeat it."
 stt_failed:
   - "Sorry, I couldn't hear that clearly. Could you say it again, or type your message?"
 error_fallback:

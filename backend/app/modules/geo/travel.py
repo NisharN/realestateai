@@ -60,6 +60,8 @@ class TravelTime(BaseModel):
     to_id: str
     to_name_en: str
     to_name_ar: str
+    to_lat: float
+    to_lng: float
     minutes: int
     km: float
     method: str  # "osrm" | "straight_line"
@@ -85,6 +87,7 @@ def straight_line(origin: Community | Landmark, dest: Landmark) -> TravelTime:
     minutes = max(3, round(km / ASSUMED_SPEED_KMH * 60))
     return TravelTime(
         from_id=origin.id, to_id=dest.id, to_name_en=dest.name_en, to_name_ar=dest.name_ar,
+        to_lat=dest.lat, to_lng=dest.lng,
         minutes=minutes, km=round(km, 1), method="straight_line", approx=True,
     )
 
@@ -110,6 +113,7 @@ async def travel_time(from_community_id: str, landmark_id: str) -> TravelTime | 
     if row and row.get("minutes") is not None:
         return TravelTime(
             from_id=origin.id, to_id=dest.id, to_name_en=dest.name_en, to_name_ar=dest.name_ar,
+            to_lat=dest.lat, to_lng=dest.lng,
             minutes=int(row["minutes"]), km=float(row.get("km") or 0.0),
             method=str(row.get("method") or "osrm"), approx=str(row.get("method")) != "osrm",
             computed_at=row.get("computed_at"),
