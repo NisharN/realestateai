@@ -56,6 +56,7 @@ class ExtractedFacts(BaseModel):
     budget_question: str | None = None
     area_candidates: list[str] = Field(default_factory=list)  # community ids resolved with confidence >= 0.8
     area_unresolved: bool = False  # buyer named a place we could not resolve
+    focus_property_id: str | None = None  # card the buyer clicked; resolved against shown properties
     rules_only: bool = False
     text: str = ""
 

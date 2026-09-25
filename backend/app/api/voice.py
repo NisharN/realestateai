@@ -177,6 +177,7 @@ class VoiceSession:
             "turn_id": turn_id,
             "user_text": user_text,
             "reply": result.reply,
+            "language": self.language,
             "spoken_text": speakify(result.reply, self.language),
             "move": result.move,
             "stage": result.stage,
@@ -198,7 +199,7 @@ class VoiceSession:
         reply = templates.render(key, self.language, facts)
         payload: dict[str, Any] = {
             "type": "reply", "turn_id": turn_id, "user_text": user_text, "reply": reply,
-            "spoken_text": speakify(reply, self.language), "fallbacks": fallbacks,
+            "language": self.language, "spoken_text": speakify(reply, self.language), "fallbacks": fallbacks,
         }
         if stt_error:
             payload["stt_error"] = stt_error
