@@ -314,3 +314,11 @@ async def test_engine_area_answer_quotes_only_stored_travel_numbers():
     travel = r.area["travel"]
     assert travel and travel[0]["to_id"] == "downtown" and travel[0]["approx"] is True
     assert str(travel[0]["minutes"]) in r.reply and ("approx" in r.reply or "about" in r.reply)
+
+
+@pytest.mark.asyncio
+async def test_engine_turn_emits_lead_scored_for_writeback():
+    lead = await _lead(phone="+971500000005")
+    await handle_turn(lead["id"], "2 bed apartment in marina, budget 2.5m to buy", workspace_id=WS)
+    evs = await table("lead_events", WS).select(lead_id=lead["id"], type="lead.scored")
+    assert evs and "score" in evs[0]["payload"]["changed_fields"]

@@ -25,6 +25,7 @@ from app.config import get_settings
 from app.database import get_lead_repository
 from app.modules.agents import extractor, scorer
 from app.modules.agents.responder import respond
+from app.modules.ingestion import events
 from app.modules.handoff import followups
 from app.modules.handoff.service import create_handoff
 from app.modules.leads.profile import lead_updates_from_state, merge
@@ -389,6 +390,9 @@ async def _mirror_lead(state: ConversationState, workspace_id: str) -> None:
             updates = lead_updates_from_state(state)
             updates["intent_score"] = state.score
             await repo.update(state.lead_id, updates)
+            changed = [k for k in ("score", "intent_score", "stage", "status", "band") if k in updates and lead.get(k) != updates[k]]
+            if changed:
+                await events.emit(state.lead_id, "lead.scored", {"changed_fields": changed, "score": state.score, "turn": state.turn}, workspace_id=workspace_id)
     except Exception as exc:
         logger.debug("lead mirror skipped: %s", exc)
 

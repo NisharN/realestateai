@@ -434,3 +434,47 @@ async def test_crm_writeback_skips_leads_without_writeback_connector():
     await table("lead_events", WS).insert({"lead_id": lead["id"], "type": "lead.updated", "payload": {}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as http:
         assert await run_writeback(WS, client=http) == 1  # consumed, nothing sent, no error
+
+
+async def test_crm_writeback_routes_each_crm_its_own_external_id():
+    from app.modules.ingestion.writeback import run_writeback
+
+    patches: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if request.method == "GET":
+            ext = "a-1" if host == "crm-a.test" else "b-2"
+            return httpx.Response(200, json=[{"id": ext, "Mobile": "0507777777", "Name": "Same Person"}])
+        patches.append(str(request.url))
+        return httpx.Response(200, json={})
+
+    ids = []
+    for host in ("crm-a.test", "crm-b.test"):
+        cfg = {"url": f"https://{host}/leads", "write_back_url": f"https://{host}/leads/{{id}}"}
+        ids.append(client.post("/api/v1/admin/connectors", json={"type": "generic_crm", "credential": "tok", "config": cfg}).json()["id"])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        lead_ids = set()
+        for cid in ids:
+            res = await poll_connector(cid, workspace_id=WS, client=http)
+            lead_ids |= {o.lead_id for o in await process_many(res["raw_ids"], workspace_id=WS)}
+        assert len(lead_ids) == 1  # merged on phone
+        await table("lead_events", WS).insert({"lead_id": lead_ids.pop(), "type": "lead.scored", "payload": {}})
+        await run_writeback(WS, client=http)
+    assert set(patches) == {"https://crm-a.test/leads/a-1", "https://crm-b.test/leads/b-2"}
+
+
+async def test_pending_events_are_not_capped_by_processed_prefix():
+    lead = await get_lead_repository(WS).create({"name": "Many", "phone": "+971501239999", "source": "website"})
+    seen: list[str] = []
+
+    async def handler(event):
+        seen.append(event["id"])
+
+    for _ in range(450):
+        await events.emit(lead["id"], "lead.updated", {}, workspace_id=WS)
+    while await events.consume(WS, "t", handler, limit=100):
+        pass
+    await events.emit(lead["id"], "lead.updated", {"n": 451}, workspace_id=WS)
+    assert await events.consume(WS, "t", handler, limit=100) == 1
+    assert len(seen) == 451 and len(set(seen)) == 451

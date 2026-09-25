@@ -129,6 +129,7 @@ async def travel_summary(from_community_id: str, landmark_ids: tuple[str, ...] =
 async def store_travel_times(rows: list[dict[str, Any]], *, method: str) -> int:
     """Upsert a batch produced by the precompute script. Never deletes: a failed
     refresh keeps last week's table (§7)."""
+    await seed_landmarks()
     t = table("travel_times", GEO_WORKSPACE)
     stamp = now_iso()
     n = 0
@@ -140,6 +141,14 @@ async def store_travel_times(rows: list[dict[str, Any]], *, method: str) -> int:
         await t.upsert(payload, on_conflict="from_id,to_id")
         n += 1
     return n
+
+
+async def seed_landmarks() -> int:
+    """Upsert the landmark catalog; ``travel_times.to_id`` references it."""
+    t = table("landmarks", GEO_WORKSPACE)
+    for row in landmark_rows():
+        await t.upsert(dict(row), on_conflict="id")
+    return len(LANDMARKS)
 
 
 def landmark_rows() -> list[dict[str, object]]:
