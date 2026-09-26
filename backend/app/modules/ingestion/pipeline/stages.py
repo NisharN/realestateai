@@ -23,7 +23,7 @@ _SOURCE_ALIASES = {
     "web": "web", "website": "web", "site": "web", "landing": "web", "form": "web",
     "referral": "referral", "referred": "referral",
     "whatsapp": "whatsapp", "wa": "whatsapp",
-    "crm": "crm", "generic_crm": "crm", "hubspot": "crm", "zoho": "crm", "salesforce": "crm", "bitrix": "crm", "bitrix24": "crm",
+    "crm": "crm", "generic_crm": "crm", "realestate_crm": "crm", "ai_agent": "crm", "hubspot": "crm", "zoho": "crm", "salesforce": "crm", "bitrix": "crm", "bitrix24": "crm",
     "csv": "csv", "webhook": "webhook", "manual": "manual",
     "broker_api": "broker_api", "developer_api": "broker_api", "meta_lead_ads": "meta_lead_ads", "meta": "meta_lead_ads",
     "facebook": "meta_lead_ads", "instagram": "meta_lead_ads", "gmail": "gmail", "email": "gmail", "voice_notes": "whatsapp",
