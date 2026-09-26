@@ -154,22 +154,22 @@ function Answer({ result, onAction, busy }: { result: AnalyticsResult; onAction:
       {leads.length > 0 && (
         <ul className="divide-y divide-border">
           {leads.map((l) => (
-            <li key={l.id} className="flex items-center gap-3 py-2">
+            <li key={l.id} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:gap-3">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Link href={`/broker/leads/${l.id}`} className="truncate text-sm font-medium text-foreground hover:underline">
                     {l.name}
                   </Link>
                   <Badge tone={BAND_TONE[l.band]}>{l.band}</Badge>
                   <span className="text-xs tabular-nums text-muted-foreground">{l.score}</span>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground sm:truncate">
                   {[l.areas?.join(", "), l.purpose, l.budget_max_aed ? `AED ${compact(l.budget_max_aed)}` : null, l.silent_hours != null ? `${l.silent_hours >= 48 ? `${Math.round(l.silent_hours / 24)}d` : `${l.silent_hours}h`} quiet` : null]
                     .filter(Boolean)
                     .join(" · ") || l.stage}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1 sm:justify-end">
                 {l.phone && (
                   <a href={`https://wa.me/${l.phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="ui-btn-ghost ui-btn-sm" aria-label={`WhatsApp ${l.name}`} title="WhatsApp">
                     <MessageSquareText className="h-3.5 w-3.5" />

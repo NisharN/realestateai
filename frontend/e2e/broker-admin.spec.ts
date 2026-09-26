@@ -74,25 +74,26 @@ test.describe("admin (demo mode)", () => {
   });
 });
 
-test.describe("co-work (demo mode)", () => {
-  test("overview, schedules run-now, and automation creation", async ({ page }) => {
+test.describe("operations (demo mode)", () => {
+  test("connections, routines from template with run, background jobs run-now under Advanced", async ({ page }) => {
     await page.goto("/cowork");
-    await expect(page.getByRole("heading", { name: /Co-work/ })).toBeVisible();
-    await expect(page.getByText("Scheduled jobs")).toBeVisible();
+    await expect(page).toHaveURL(/\/cowork\/connections/);
+    await expect(page.getByRole("heading", { name: "Connections" })).toBeVisible();
+    await expect(page.getByText("Where my leads come from")).toBeVisible();
 
-    await page.getByRole("tab", { name: "Schedules" }).click();
+    await page.getByRole("tab", { name: "Routines" }).click();
+    await expect(page).toHaveURL(/\/cowork\/routines/);
+    await page.getByRole("button", { name: "Templates" }).click();
+    await page.getByRole("button", { name: /Re-engage|quiet|stale/i }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Save & run once" }).click();
+    await expect(page.getByText(/Run result/)).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Run now" }).first()).toBeVisible();
+
+    await page.getByRole("button", { name: "Advanced" }).click();
+    await page.getByRole("menuitem", { name: "Background jobs" }).click();
     await page.getByRole("button", { name: "Run now" }).first().click();
     await expect(page.getByRole("status")).toContainText(/Ran /);
-    await expect(page.getByText("Run history")).toBeVisible();
-
-    await page.getByRole("tab", { name: "Automations" }).click();
-    await page.getByRole("button", { name: "New automation" }).click();
-    await page.getByPlaceholder("Hot lead follow-up task").fill("E2E hot lead task");
-    await page.getByRole("button", { name: "Create automation" }).click();
-    await expect(page.getByRole("status")).toContainText("Automation created");
-    await expect(page.getByText("E2E hot lead task")).toBeVisible();
-
-    await page.getByRole("tab", { name: "Activity" }).click();
-    await expect(page.getByText("Audit trail")).toBeVisible();
   });
 });
