@@ -93,6 +93,7 @@ test.describe("operations (demo mode)", () => {
 
     await page.getByRole("button", { name: "Advanced" }).click();
     await page.getByRole("menuitem", { name: "Background jobs" }).click();
+    await expect(page.getByRole("heading", { name: "Lead intake" })).toBeVisible();
     await page.getByRole("button", { name: "Run now" }).first().click();
     await expect(page.getByRole("status")).toContainText(/Ran /);
   });
