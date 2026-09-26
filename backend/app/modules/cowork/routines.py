@@ -26,6 +26,10 @@ TABLE = "cowork_routines"
 RUNS_TABLE = "cowork_routine_runs"
 MAX_STEPS = 12
 MAX_LEADS = 200
+PUSH_LEAD_FIELDS = (
+    "id", "first_name", "last_name", "name", "phone", "phone_e164", "email", "preferred_language", "language", "stage", "score", "band", "score_reasons",
+    "purpose", "property_type", "bedrooms_min", "timeline", "payment", "budget_min_aed", "budget_max_aed", "area_preference", "assigned_broker", "initial_message", "crm_external_id",
+)
 MAX_MESSAGES_PER_RUN = 50
 FORBIDDEN_JOBS = {"run_routines", "run_automations"}
 
@@ -619,13 +623,19 @@ async def _connector_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, An
     if action == "push_leads":
         sent = failed = 0
         last: dict[str, Any] = {}
+        linked = 0
         for lead in ctx.leads[:MAX_LEADS]:
-            last = await conn.execute_action(ws, row, "push_lead", {"lead": {k: lead.get(k) for k in ("id", "first_name", "last_name", "name", "phone", "email", "stage", "score", "budget_max_aed", "area_preference")}})
+            last = await conn.execute_action(ws, row, "push_lead", {"lead": {k: lead.get(k) for k in PUSH_LEAD_FIELDS}})
             if last.get("simulated"):
                 return {"simulated": True, "reason": last.get("reason"), "would_push": len(ctx.leads)}
             sent += 1 if last.get("ok") else 0
             failed += 0 if last.get("ok") else 1
-        return {"pushed": sent, "failed": failed}
+            if last.get("ok") and last.get("crm_lead_id") and not lead.get("crm_external_id"):
+                from app.database import get_lead_repository
+
+                await get_lead_repository(ws).update(lead["id"], {"crm_external_id": str(last["crm_lead_id"]), "updated_at": now_iso()})
+                linked += 1
+        return {"pushed": sent, "failed": failed, "linked": linked}
 
     if action == "send_message":
         sent = skipped = 0
