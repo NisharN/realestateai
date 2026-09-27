@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+from app.modules.cowork import realestate_crm
 from app.modules.cowork.providers import (
     PROVIDERS,
     ProviderSpec,
@@ -269,8 +270,8 @@ def _ping_request(spec: ProviderSpec, cfg: dict[str, str]) -> tuple[str, str, di
         return "GET", f"{base or 'https://www.zohoapis.com'}/crm/v2/settings/modules", None
     if spec.id == "propertybase":
         return "GET", f"{base}/services/data/", None
-    if spec.id == "realestate_crm":
-        return "GET", f"{base}/health", None
+    if spec.id == realestate_crm.PROVIDER:
+        return "GET", f"{base}/v1/me", None
     if spec.id == "property_finder":
         return "GET", f"{base or 'https://api.propertyfinder.ae'}{cfg.get('listings_path') or '/v1/listings'}?limit=1", None
     return "GET", base, None
@@ -397,6 +398,8 @@ def sign(secret: str, body: bytes) -> str:
 
 def normalize_inbound(provider: str, data: Any) -> list[RawRecord]:
     """Map a provider payload into raw lead records the ingestion pipeline understands."""
+    if provider == realestate_crm.PROVIDER:
+        return realestate_crm.normalize(data)
     items: list[dict[str, Any]]
     if isinstance(data, list):
         items = [i for i in data if isinstance(i, dict)]
@@ -580,7 +583,7 @@ def normalize_listing(provider: str, item: dict[str, Any]) -> dict[str, Any] | N
         "bedrooms": item.get("bedrooms") or item.get("beds"),
         "bathrooms": item.get("bathrooms") or item.get("baths"),
         "size_sqft": item.get("size_sqft") or item.get("size"),
-        "images": item.get("images") or ([item["image"]] if item.get("image") else []),
+        "images": item.get("images") or item.get("photos") or ([item["image"]] if item.get("image") else []),
         "permit_number": item.get("permit_number") or item.get("rera_permit") or item.get("trakheesi"),
         "is_active": item.get("is_active", True),
         "updated_at": now_iso(),
@@ -624,7 +627,7 @@ async def execute_action(workspace_id: str, connection_row: Row, action: str, pa
         if action == "pull_listings":
             return await _pull_listings(workspace_id, spec, cfg, params)
         if action == "pull_leads":
-            return await _pull_leads(workspace_id, spec, cfg, params)
+            return await _pull_leads(workspace_id, spec, cfg, params, row=connection_row)
         if action == "push_lead":
             return await _push_lead(spec, cfg, params)
         if action == "send_message":
@@ -691,7 +694,9 @@ async def _land_and_process(workspace_id: str, records: list[RawRecord], *, fetc
     }
 
 
-async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
+async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any], *, row: Row | None = None) -> dict[str, Any]:
+    if spec.id == realestate_crm.PROVIDER:
+        return await _pull_realestate_crm_leads(workspace_id, cfg, params, row=row)
     if spec.id == "gmail":
         return await _pull_gmail_leads(workspace_id, spec, cfg, params)
     if spec.id == "meta_lead_ads":
@@ -707,6 +712,42 @@ async def _pull_leads(workspace_id: str, spec: ProviderSpec, cfg: dict[str, str]
     data = await _get_json(spec, cfg, url)
     items = _items(data, cfg.get("items_path"))
     return await _land_and_process(workspace_id, normalize_inbound(spec.id, items), fetched=len(items))
+
+
+async def _pull_realestate_crm_leads(workspace_id: str, cfg: dict[str, str], params: dict[str, Any], *, row: Row | None) -> dict[str, Any]:
+    """Changed-since pull from the standalone CRM; cursor/watermark live in ``sync_state`` on the connection.
+
+    The CRM is authoritative for pipeline stage, so after the pipeline has merged the
+    records the platform lead's stage is aligned to the CRM's where they differ.
+    """
+    state = dict((row or {}).get("sync_state") or {})
+    if params.get("full"):
+        state = {}
+    items, new_state = await realestate_crm.fetch_changed_leads(_http, cfg, state)
+    result = await _land_and_process(workspace_id, realestate_crm.normalize(items), fetched=len(items))
+    stages = {str(i["id"]): s for i in items if i.get("id") and (s := realestate_crm.stage_from_crm(i))}
+    result["stage_synced"] = await _sync_crm_stages(workspace_id, result.get("lead_ids") or [], stages)
+    if row is not None:
+        await table(TABLE, workspace_id).update({"sync_state": {**new_state, "last_pull_at": now_iso()}, "updated_at": now_iso()}, id=row["id"])
+    return {**result, "cursor": new_state.get("cursor"), "updated_after": new_state.get("updated_after")}
+
+
+async def _sync_crm_stages(workspace_id: str, lead_ids: list[str], crm_stages: dict[str, str]) -> int:
+    from app.database import get_lead_repository
+
+    if not lead_ids or not crm_stages:
+        return 0
+    repo = get_lead_repository(workspace_id)
+    changed = 0
+    for lead_id in lead_ids:
+        lead = await repo.get_by_id(lead_id)
+        if not lead or lead.get("opted_out_at"):
+            continue
+        target = crm_stages.get(str(lead.get("crm_external_id") or ""))
+        if target and target != lead.get("stage"):
+            await repo.update(lead_id, {"stage": target, "status": target, "updated_at": now_iso()})
+            changed += 1
+    return changed
 
 
 GRAPH = "https://graph.facebook.com/v20.0"
@@ -819,6 +860,8 @@ async def _send_voice_note(spec: ProviderSpec, cfg: dict[str, str], params: dict
 
 async def _push_lead(spec: ProviderSpec, cfg: dict[str, str], params: dict[str, Any]) -> dict[str, Any]:
     lead = params.get("lead") or {}
+    if spec.id == realestate_crm.PROVIDER:
+        return await realestate_crm.push_lead(_http, cfg, lead)
     if spec.id == "bitrix24":
         url = f"{(cfg.get('webhook_url') or '').rstrip('/')}/crm.lead.add.json"
         body = {"fields": {"TITLE": lead.get("name") or "Lead", "PHONE": [{"VALUE": lead.get("phone")}], "EMAIL": [{"VALUE": lead.get("email")}]}}
