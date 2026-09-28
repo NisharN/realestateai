@@ -30,7 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Badge, Skeleton, type BadgeTone } from "@/components/ui/page";
-import { coworkApi, type Connection, type ConnectionHealth, type ProviderCategory, type ProviderSpec, type WebhookTestResult } from "@/lib/api";
+import { coworkApi, type ApiResponse, type Connection, type ConnectionHealth, type ConnectionTestResult, type ProviderCategory, type ProviderSpec, type WebhookTestResult } from "@/lib/api";
 import { relativeTime } from "@/lib/broker-format";
 import type { Say } from "./ingestion-tools";
 
@@ -223,6 +223,11 @@ function ProviderGlyph({ id }: { id: string }) {
   return <Icon className="h-4 w-4 text-brand" aria-hidden />;
 }
 
+function testOutcome(r: ApiResponse<ConnectionTestResult>): ApiResponse<ConnectionTestResult> {
+  if (r.data && r.data.status === "failed") return { ...r, error: r.data.detail };
+  return r;
+}
+
 function ConnectionCard({ connection: c, spec, say, onChanged, onEdit }: { connection: Connection; spec?: ProviderSpec; say: Say; onChanged: () => void; onEdit: () => void }) {
   const [busy, setBusy] = useState<"test" | "webhook" | "toggle" | "delete" | null>(null);
   const [webhook, setWebhook] = useState<WebhookTestResult | null>(null);
@@ -231,7 +236,7 @@ function ConnectionCard({ connection: c, spec, say, onChanged, onEdit }: { conne
   const test = async () => {
     setBusy("test");
     const r = await coworkApi.testConnection(c.id);
-    say(r, r.data ? `${c.display_name}: ${r.data.detail}` : "");
+    say(testOutcome(r), r.data ? `${c.display_name}: ${r.data.detail}` : "");
     setBusy(null);
     onChanged();
   };
@@ -382,7 +387,7 @@ function SetupDrawer({ spec, existing, onClose, onSaved, say }: { spec: Provider
     const r = existing ? await coworkApi.patchConnection(existing.id, { display_name: name, config }) : await coworkApi.createConnection({ provider: spec.id, display_name: name, config });
     if (r.data && testAfter) {
       const t = await coworkApi.testConnection(r.data.id);
-      say(t, t.data ? `${name}: ${t.data.detail}` : "");
+      say(testOutcome(t), t.data ? `${name}: ${t.data.detail}` : "");
     } else {
       say(r, existing ? "Connection updated" : "Connection added");
     }
