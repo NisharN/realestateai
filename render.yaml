@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: realestateai-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile.render
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: APP_ENV
+        value: demo
+      - key: DEMO_AUTH
+        value: "true"
+      - key: DEMO_SEED_SCALE
+        value: "500"
+      - key: REDIS_URL
+        value: ""
+      - key: CORS_ORIGINS
+        value: "https://realestateai-coral.vercel.app,https://realestateai.vercel.app,https://realestateai-nishars-projects.vercel.app"
