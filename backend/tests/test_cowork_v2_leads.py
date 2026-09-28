@@ -422,3 +422,29 @@ async def test_voice_send_note_routine_step_reports_failures_without_text_fallba
     step = run["steps"][1]
     assert step["status"] == "failed"
     assert step["summary"]["text_fallback"] is False and step["summary"]["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_push_leads_writes_same_run_qualification_to_crm():
+    patches: list[dict] = []
+
+    def handler(request: httpx.Request):
+        if request.method == "POST" and request.url.path == "/v1/leads":
+            return httpx.Response(200, json={"lead": {"id": "crm-1"}, "created": True})
+        if request.method == "PATCH":
+            patches.append(json.loads(request.content))
+            return httpx.Response(200, json={"lead": {"id": "crm-1"}})
+        return httpx.Response(404)
+
+    _mock_http(handler)
+    repo = get_lead_repository(WS)
+    await repo.create({"first_name": "Unscored", "phone": "+971500000031", "source": "q", "status": "new", "stage": "new", "budget_max_aed": 3_000_000, "timeline": "asap", "language": "en"})
+    crm = await connections.create_connection(WS, ConnectionIn(provider="realestate_crm", config={"base_url": "https://crm.example.com", "api_key": "crm_live_x"}), actor="u1")
+    routine = await routines.create_routine(
+        WS,
+        RoutineIn(name="sync", schedule=Schedule(kind="daily", at="09:00"), steps=[Step(type="leads.select", params={"source": "q"}), Step(type="llm.qualify"), Step(type="connector.push_leads", connection_id=crm["id"])]),
+        actor="u1",
+    )
+    run = await routines.run_routine(WS, routine["id"])
+    assert run["steps"][2]["summary"]["pushed"] == 1
+    assert patches and patches[-1]["band"] in ("hot", "warm", "cold") and 0 <= patches[-1]["score"] <= 100

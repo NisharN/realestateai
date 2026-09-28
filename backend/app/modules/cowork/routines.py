@@ -404,10 +404,18 @@ async def _validate_listings(ctx: RunContext, params: dict[str, Any]) -> dict[st
     return {"checked": len(rows), "with_issues": len(issues)}
 
 
-def _rule_qualify(lead: Row) -> dict[str, Any]:
+async def _rule_qualify(lead: Row, workspace_id: str) -> dict[str, Any]:
+    """Deterministic fallback: run the platform scorer (facts + behaviour) so unscored leads still get a real score."""
+    from app.modules.agents import rescoring
+
+    try:
+        res = await rescoring.rescore_lead(lead, workspace_id=workspace_id, trigger="routine.qualify")
+        lead.update({"score": res["score"], "band": res["band"]})
+    except Exception:  # noqa: BLE001
+        logger.warning("rescoring failed during routine qualify for %s", lead.get("id"))
     score = int(lead.get("score") or 0)
     band = (lead.get("band") or ("hot" if score >= 70 else "warm" if score >= 40 else "cold")).lower()
-    reasons = []
+    reasons = list(lead.get("score_reasons") or [])
     if lead.get("budget_max_aed"):
         reasons.append("budget stated")
     if lead.get("timeline"):
@@ -486,7 +494,7 @@ async def _llm_qualify(ctx: RunContext, params: dict[str, Any], *, connection_id
                 llm_used += 1
             except LLMUnavailable:
                 result = None
-        ctx.qualifications[lead["id"]] = result or _rule_qualify(lead)
+        ctx.qualifications[lead["id"]] = result or await _rule_qualify(lead, ctx.workspace_id)
     out: dict[str, Any] = {
         "qualified": len(ctx.qualifications),
         "jev": jev_used,
@@ -625,7 +633,11 @@ async def _connector_step(ctx: RunContext, step: dict[str, Any]) -> dict[str, An
         last: dict[str, Any] = {}
         linked = 0
         for lead in ctx.leads[:MAX_LEADS]:
-            last = await conn.execute_action(ws, row, "push_lead", {"lead": {k: lead.get(k) for k in PUSH_LEAD_FIELDS}})
+            payload = {k: lead.get(k) for k in PUSH_LEAD_FIELDS}
+            q = ctx.qualifications.get(lead["id"])
+            if q:
+                payload.update({"score": q.get("score"), "band": q.get("band"), "score_reasons": q.get("reasons") or payload.get("score_reasons")})
+            last = await conn.execute_action(ws, row, "push_lead", {"lead": payload})
             if last.get("simulated"):
                 return {"simulated": True, "reason": last.get("reason"), "would_push": len(ctx.leads)}
             sent += 1 if last.get("ok") else 0
