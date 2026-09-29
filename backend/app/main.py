@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    logger.info("🚀 Dubai Real Estate AI Platform starting...")
+    logger.info("🚀 PropX AI starting...")
     counts = load_demo_scale()
     if counts:
         logger.info("demo scale data loaded: %s", counts)
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Dubai Real Estate AI Lead Generation Platform",
+    title="PropX AI",
     description="Multi-agent AI system for real estate lead generation, qualification, and closing",
     version="1.0.0",
     lifespan=lifespan,
@@ -82,7 +82,7 @@ async def root():
     """Health check."""
     return {
         "status": "online",
-        "service": "Dubai Real Estate AI",
+        "service": "PropX AI",
         "version": "1.0.0",
         "engine": ["extractor", "policy", "scorer", "responder", "guard", "handoff"]
     }

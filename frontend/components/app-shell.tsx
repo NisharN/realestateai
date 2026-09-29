@@ -101,7 +101,7 @@ function Brand() {
         <Building2 className="h-3.5 w-3.5 text-white" />
       </div>
       <div className="leading-tight">
-        <p className="text-[13px] font-semibold text-foreground tracking-tight">Dubai Real Estate AI</p>
+        <p className="text-[13px] font-semibold text-foreground tracking-tight">PropX AI</p>
         <p className="text-[11px] text-muted-foreground">Brokerage workspace</p>
       </div>
     </Link>
@@ -163,7 +163,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="h-7 w-7 rounded-md bg-ink flex items-center justify-center">
               <Building2 className="h-3.5 w-3.5 text-white" />
             </div>
-            Dubai Real Estate AI
+            PropX AI
           </Link>
           <button type="button" aria-label="Toggle navigation" onClick={() => setOpen((v) => !v)} className="ui-btn-ghost p-2">
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}

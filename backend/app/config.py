@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # so there is no X-Workspace-ID header and no shared-instance data-leak
     # surface to get wrong.
     WORKSPACE_ID: str = "00000000-0000-0000-0000-000000000001"
-    WORKSPACE_NAME: str = "Demo Brokerage"
+    WORKSPACE_NAME: str = "PropX AI"
 
     # Demo auth: when true, requests are authenticated as a local demo owner
     # instead of requiring a real Supabase session. This is what lets the whole
@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     VOICE_MAX_UTTERANCE_S: int = 30
     VOICE_MAX_AUDIO_BYTES: int = 2 * 1024 * 1024
     VOICE_MAX_TEXT_CHARS: int = 2000
-    VOICE_HANDS_FREE_DEFAULT: bool = True     # re-open the mic after Ali finishes speaking
+    VOICE_HANDS_FREE_DEFAULT: bool = True     # re-open the mic after the assistant finishes speaking
     HANDOFF_REASSIGN_MINUTES: int = 15
 
     # --- Demo data (mock mode only) ---
