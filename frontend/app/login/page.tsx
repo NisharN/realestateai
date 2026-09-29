@@ -50,7 +50,7 @@ function LoginForm() {
     <main className="min-h-screen bg-[#f4efe6] px-6 py-16 text-slate-950">
       <div className="mx-auto grid max-w-5xl overflow-hidden rounded-[2rem] bg-card shadow-2xl md:grid-cols-2">
         <section className="bg-brand p-10 text-white md:p-14">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-300">Ali</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-300">PropX AI</p>
           <h1 className="mt-6 text-4xl font-semibold leading-tight">The private AI desk for Dubai property teams.</h1>
           <p className="mt-5 max-w-md text-slate-300">Invite-only access for brokers managing qualified leads, live inventory, and bilingual conversations.</p>
         </section>

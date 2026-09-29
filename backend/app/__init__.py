@@ -1,1 +1,1 @@
-"""Dubai Real Estate AI backend application."""
+"""PropX AI backend application."""

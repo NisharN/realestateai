@@ -8,7 +8,7 @@ const display = Instrument_Serif({ subsets: ["latin"], weight: "400", variable: 
 const notoArabic = Noto_Sans_Arabic({ subsets: ["arabic"], variable: "--font-arabic", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Dubai Real Estate AI - Ali",
+  title: "PropX AI",
   description: "AI-powered property assistant for Dubai real estate",
 };
 

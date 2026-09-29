@@ -111,7 +111,7 @@ def get_nurture_schedule(lead_created_at: datetime) -> List[Dict[str, Any]]:
     schedule = []
 
     touchpoints = [
-        (1, "welcome", "Welcome to Dubai Real Estate AI"),
+        (1, "welcome", "Welcome to PropX AI"),
         (3, "recommendations", "Properties matching your search"),
         (7, "site_visit", "Schedule your site visit"),
         (14, "market_update", "Dubai market update"),

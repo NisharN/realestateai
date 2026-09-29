@@ -1,15 +1,15 @@
 import type { Language } from "./types";
 
 const en = {
-  appName: "Dubai Real Estate AI",
-  poweredBy: "Powered by Ali",
-  assistant: "Ali",
+  appName: "PropX AI",
+  poweredBy: "Powered by PropX AI",
+  assistant: "PropX",
   online: "Online",
   lead: "Lead",
   welcome:
-    "Hello! I'm Ali, your Dubai property assistant.\n\nI can help you find apartments, villas, and penthouses across Dubai. What are you looking for?",
+    "Hello! I'm PropX, your Dubai property assistant.\n\nI can help you find apartments, villas, and penthouses across Dubai. What are you looking for?",
   registered: "Thanks! I've registered you. Now tell me — are you looking to buy, rent, or invest, and in which area?",
-  thinking: "Ali is thinking...",
+  thinking: "PropX is thinking...",
   inputPlaceholder: "Ask about properties, areas, prices...",
   send: "Send",
   voice: "Voice Conversation",
@@ -49,7 +49,7 @@ const en = {
   listening: "Listening… tap to send",
   connecting: "Connecting…",
   sending: "Transcribing…",
-  speaking: "Ali is speaking — tap the mic or type to interrupt",
+  speaking: "PropX is speaking — tap the mic or type to interrupt",
   tapMic: "Tap the mic to talk",
   stopVoice: "Stop voice",
   handsFree: "Hands-free",
@@ -73,14 +73,14 @@ const en = {
 export type Strings = typeof en;
 
 const ar: Strings = {
-  appName: "عقارات دبي بالذكاء الاصطناعي",
-  poweredBy: "بمساعدة علي",
-  assistant: "علي",
+  appName: "PropX AI",
+  poweredBy: "بمساعدة PropX AI",
+  assistant: "PropX",
   online: "متصل",
   lead: "عميل",
-  welcome: "مرحباً! أنا علي، مساعدك العقاري في دبي.\n\nأساعدك في إيجاد شقق وفلل وبنتهاوس في جميع مناطق دبي. عن ماذا تبحث؟",
+  welcome: "مرحباً! أنا PropX، مساعدك العقاري في دبي.\n\nأساعدك في إيجاد شقق وفلل وبنتهاوس في جميع مناطق دبي. عن ماذا تبحث؟",
   registered: "شكراً! تم تسجيلك. أخبرني الآن — هل تبحث عن شراء أو إيجار أو استثمار، وفي أي منطقة؟",
-  thinking: "علي يفكر...",
+  thinking: "PropX يفكر...",
   inputPlaceholder: "اسأل عن العقارات والمناطق والأسعار...",
   send: "إرسال",
   voice: "محادثة صوتية",
@@ -120,7 +120,7 @@ const ar: Strings = {
   listening: "أستمع… اضغط للإرسال",
   connecting: "جارٍ الاتصال…",
   sending: "جارٍ التحويل إلى نص…",
-  speaking: "علي يتحدث — اضغط الميكروفون أو اكتب للمقاطعة",
+  speaking: "PropX يتحدث — اضغط الميكروفون أو اكتب للمقاطعة",
   tapMic: "اضغط الميكروفون للتحدث",
   stopVoice: "إيقاف الصوت",
   handsFree: "بدون استخدام اليدين",
